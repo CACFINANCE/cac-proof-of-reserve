@@ -1,198 +1,157 @@
-require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const axios = require('axios');
+const cors = require('cors');
+require('dotenv').config();
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 app.use(cors());
 
-const PORT = process.env.PORT || 3000;
+const wallets = {
+  btc: 'bc1qjfg46f6ru9h6wrdejkqa6um8496lpls59knsr7',
+  eth: '0xc199a4e487Fb1eB5a03f16e56CB970338f2cC0cb',
+  trx: 'TEK2WDVsMVxogtQGfVA6WwboidawRr69oy',
+  xrp: 'rNZKMy6YiEDZ4pbJyqCSiaA4BWs6Mq8jyf',
+  usdc: '0xf3d71E003dD5C38B2E797a3fed0Aa1ac92dB1266',
+  paxg: '0x5968364A1e1aF7fAEbf8c8AD9805709eF4beb936',
+  sol: 'C566EL3iLEmEm8GETMzHDQwMPwWmxwiuwnskDyKZpT7u',
+  render: 'C5oLMbkgPHig7YX6yZwiXnpxkPyiNYMYnjz7wLbsCnL1',
+  kaspa: 'kaspa:qzmre59lsdqpd66tvz5wceaw74ez8xj7x2ldvdscxngv0ld4g237v3d4dkmnd'
+};
 
-// Wallet addresses
-const solanaWallet = 'C566EL3iLEmEm8GETMzHDQwMPwWmxwiuwnskDyKZpT7u';
-const renderWallet = 'C5oLMbkgPHig7YX6yZwiXnpxkPyiNYMYnjz7wLbsCnL1';
-const renderMint = 'rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof';
-const btcWallet = 'bc1qjfg46f6ru9h6wrdejkqa6um8496lpls59knsr7';
-const ethWallet = '0xc199a4e487Fb1eB5a03f16e56CB970338f2cC0cb';
-const tronWallet = 'TEK2WDVsMVxogtQGfVA6WwboidawRr69oy';
-const xrpWallet = 'rNZKMy6YiEDZ4pbJyqCSiaA4BWs6Mq8jyf';
-const kasWallet = 'qzmre59lsdqpd66tvz5wceaw74ez8xj7x2ldvdscxngv0ld4g237v3d4dkmnd';
-const paxgWallet = '0x5968364A1e1aF7fAEbf8c8AD9805709eF4beb936';
-const usdcWallet = '0xf3d71E003dD5C38B2E797a3fed0Aa1ac92dB1266';
-
-// API Keys
-const COVALENT_API_KEY = process.env.COVALENT_API_KEY;
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+const COVALENT_API_KEY = process.env.COVALENT_API_KEY;
 
-// --- SOLANA ---
-async function fetchSolanaBalance() {
-  const url = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
-  try {
-    const body = {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'getBalance',
-      params: [solanaWallet]
-    };
-    const res = await axios.post(url, body, { headers: { 'Content-Type': 'application/json' } });
-    return res.data.result.value / 1e9;
-  } catch (err) {
-    console.error('SOL fetch error:', err.message);
-    throw new Error('SOL balance fetch failed');
-  }
-}
+app.get('/api/balances', async (req, res) => {
+  const results = {};
 
-async function fetchRenderBalance() {
-  const url = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
   try {
-    const body = {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "getTokenAccountsByOwner",
-      params: [
-        renderWallet,
-        { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" },
-        { encoding: "jsonParsed" }
-      ]
-    };
-    const res = await axios.post(url, body, { headers: { 'Content-Type': 'application/json' } });
-    const accounts = res.data.result.value;
-    let total = 0;
-    for (const acc of accounts) {
-      const info = acc.account.data.parsed.info;
-      if (info.mint === renderMint) {
-        total += parseFloat(info.tokenAmount.uiAmount);
-      }
-    }
-    return total;
-  } catch (err) {
-    console.error('RNDR fetch error:', err.message);
-    throw new Error('RNDR balance fetch failed');
-  }
-}
-
-// --- USDC (Ethereum) ---
-async function fetchUSDCBalance() {
-  try {
-    const url = `https://api.covalenthq.com/v1/1/address/${usdcWallet}/balances_v2/?key=${COVALENT_API_KEY}`;
-    const res = await axios.get(url);
-    const usdcData = res.data.data.items.find(item => item.contract_ticker_symbol === 'USDC');
-    return usdcData ? parseFloat(usdcData.balance) / 1e6 : 0;
-  } catch (err) {
-    console.error('USDC fetch error:', err.message);
-    throw new Error('USDC balance fetch failed');
-  }
-}
-
-// --- BTC ---
-async function fetchBTCBalance() {
-  try {
-    const res = await axios.get(`https://api.blockcypher.com/v1/btc/main/addrs/${btcWallet}/balance`);
-    return res.data.final_balance / 1e8;
+    // BTC (Blockchair)
+    const btcRes = await axios.get(`https://api.blockchair.com/bitcoin/dashboards/address/${wallets.btc}`);
+    results.btc = btcRes.data.data[wallets.btc].address.balance / 1e8;
   } catch (err) {
     console.error('BTC fetch error:', err.message);
-    throw new Error('BTC balance fetch failed');
+    results.btc = null;
   }
-}
 
-// --- ETH ---
-async function fetchETHBalance() {
   try {
-    const url = `https://api.covalenthq.com/v1/eth-mainnet/address/${ethWallet}/balances_v2/?key=${COVALENT_API_KEY}`;
-    const res = await axios.get(url);
-    const ethData = res.data.data.items.find(item => item.contract_ticker_symbol === 'ETH');
-    return ethData ? parseFloat(ethData.balance) / 1e18 : 0;
+    // ETH
+    const ethRes = await axios.get(`https://api.blockchair.com/ethereum/dashboards/address/${wallets.eth}`);
+    results.eth = ethRes.data.data[wallets.eth].address.balance / 1e18;
   } catch (err) {
     console.error('ETH fetch error:', err.message);
-    throw new Error('ETH balance fetch failed');
+    results.eth = null;
   }
-}
 
-// --- TRX ---
-async function fetchTRXBalance() {
   try {
-    const url = `https://apilist.tronscanapi.com/api/account?address=${tronWallet}`;
-    const res = await axios.get(url);
-    return parseFloat(res.data.balance) / 1e6;
+    // TRON
+    const trxRes = await axios.get(`https://apilist.tronscanapi.com/api/account?address=${wallets.trx}`);
+    results.trx = trxRes.data.balance / 1e6;
   } catch (err) {
     console.error('TRX fetch error:', err.message);
-    throw new Error('TRX balance fetch failed');
+    results.trx = null;
   }
-}
 
-// --- XRP ---
-async function fetchXRPBalance() {
   try {
-    const url = 'https://s1.ripple.com:51234/';
-    const res = await axios.post(url, {
+    // XRP
+    const xrpRes = await axios.post('https://s1.ripple.com:51234/', {
       method: 'account_info',
-      params: [{ account: xrpWallet, ledger_index: 'validated' }]
+      params: [{ account: wallets.xrp, ledger_index: 'validated', strict: true }]
     });
-    const drops = res.data.result?.account_data?.Balance;
-    return drops ? parseFloat(drops) / 1e6 : 0;
+    results.xrp = xrpRes.data.result.account_data.Balance / 1e6;
   } catch (err) {
     console.error('XRP fetch error:', err.message);
-    throw new Error('XRP balance fetch failed');
+    results.xrp = null;
   }
-}
 
-// --- KASPA ---
-async function fetchKASBalance() {
   try {
-    const res = await axios.get(`https://api.kaspa.org/addresses/${kasWallet}`);
-    return parseFloat(res.data.balance.confirmed);
+    // USDC via Covalent
+    const usdcRes = await axios.get(
+      `https://api.covalenthq.com/v1/1/address/${wallets.usdc}/balances_v2/?key=${COVALENT_API_KEY}`
+    );
+    const usdcData = usdcRes.data.data.items.find(token => token.contract_ticker_symbol === 'USDC');
+    results.usdc = usdcData ? usdcData.balance / 1e6 : 0;
   } catch (err) {
-    console.error('KASPA fetch error:', err.message);
-    throw new Error('KASPA balance fetch failed');
+    console.error('USDC fetch error:', err.message);
+    results.usdc = null;
   }
-}
 
-// --- PAXG (Ethereum) ---
-async function fetchPAXGBalance() {
   try {
-    const url = `https://api.covalenthq.com/v1/1/address/${paxgWallet}/balances_v2/?key=${COVALENT_API_KEY}`;
-    const res = await axios.get(url);
-    const paxgData = res.data.data.items.find(item => item.contract_ticker_symbol === 'PAXG');
-    return paxgData ? parseFloat(paxgData.balance) / 1e18 : 0;
+    // PAXG via Covalent
+    const paxgRes = await axios.get(
+      `https://api.covalenthq.com/v1/1/address/${wallets.paxg}/balances_v2/?key=${COVALENT_API_KEY}`
+    );
+    const paxgData = paxgRes.data.data.items.find(token => token.contract_ticker_symbol === 'PAXG');
+    results.paxg = paxgData ? paxgData.balance / 1e18 : 0;
   } catch (err) {
     console.error('PAXG fetch error:', err.message);
-    throw new Error('PAXG balance fetch failed');
+    results.paxg = null;
   }
-}
 
-// --- API ROUTE ---
-app.get('/api/balances', async (req, res) => {
   try {
-    const [
-      sol, render, usdc, btc, eth,
-      trx, xrp, kas, paxg
-    ] = await Promise.all([
-      fetchSolanaBalance(),
-      fetchRenderBalance(),
-      fetchUSDCBalance(),
-      fetchBTCBalance(),
-      fetchETHBalance(),
-      fetchTRXBalance(),
-      fetchXRPBalance(),
-      fetchKASBalance(),
-      fetchPAXGBalance()
-    ]);
-
-    res.json({
-      SOL: sol,
-      RNDR: render,
-      USDC: usdc,
-      BTC: btc,
-      ETH: eth,
-      TRX: trx,
-      XRP: xrp,
-      KAS: kas,
-      PAXG: paxg
-    });
+    // Solana
+    const solanaRes = await axios.post(
+      `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getBalance',
+        params: [wallets.sol]
+      }
+    );
+    results.sol = solanaRes.data.result.value / 1e9;
   } catch (err) {
-    console.error('Balance fetch error:', err.message);
-    res.status(500).json({ error: 'Failed to fetch balances' });
+    console.error('SOL fetch error:', err.message);
+    results.sol = null;
   }
+
+  try {
+    // RNDR on Solana
+    const renderRes = await axios.post(
+      `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getTokenAccountsByOwner',
+        params: [
+          wallets.render,
+          { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' },
+          { encoding: 'jsonParsed' }
+        ]
+      }
+    );
+
+    const accounts = renderRes.data.result.value;
+    const mint = 'rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof';
+    let totalRender = 0;
+
+    for (const acc of accounts) {
+      const info = acc.account.data.parsed.info;
+      if (info.mint === mint) {
+        totalRender += parseFloat(info.tokenAmount.uiAmount);
+      }
+    }
+
+    results.rndr = totalRender;
+  } catch (err) {
+    console.error('RNDR fetch error:', err.message);
+    results.rndr = null;
+  }
+
+  try {
+    // ✅ Fixed KASPA fetch using Kaspa.org API
+    const kaspaRes = await axios.get(`https://api.kaspa.org/addresses/${wallets.kaspa}/balance`);
+    if (kaspaRes.data && kaspaRes.data.balance) {
+      results.kaspa = kaspaRes.data.balance / 1e8;
+    } else {
+      results.kaspa = null;
+    }
+  } catch (err) {
+    console.error('KASPA fetch error:', err.message);
+    results.kaspa = null;
+  }
+
+  res.json(results);
 });
 
 app.listen(PORT, () => {
