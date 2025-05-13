@@ -1,131 +1,130 @@
-require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const app = express();
+const cors = require('cors');
+require('dotenv').config();
 
+const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Wallet Addresses
+app.use(cors());
+
+// WALLET ADDRESSES
 const wallets = {
-  btc: 'bc1qjfg46f6ru9h6wrdejkqa6um8496lpls59knsr7',
-  eth: '0xc199a4e487Fb1eB5a03f16e56CB970338f2cC0cb',
-  tron: 'TEK2WDVsMVxogtQGfVA6WwboidawRr69oy',
-  xrp: 'rNZKMy6YiEDZ4pbJyqCSiaA4BWs6Mq8jyf',
-  kaspa: 'kaspa:qzmre59lsdqpd66tvz5wceaw74ez8xj7x2ldvdscxngv0ld4g237v3d4dkmnd',
-  paxg: '0x5968364A1e1aF7fAEbf8c8AD9805709eF4beb936',
-  usdc: '0xf3d71E003dD5C38B2E797a3fed0Aa1ac92dB1266',
+  BTC: 'bc1qjfg46f6ru9h6wrdejkqa6um8496lpls59knsr7',
+  ETH: '0xc199a4e487Fb1eB5a03f16e56CB970338f2cC0cb',
+  USDC: '0xf3d71E003dD5C38B2E797a3fed0Aa1ac92dB1266',
+  TRX: 'TEK2WDVsMVxogtQGfVA6WwboidawRr69oy',
+  XRP: 'rNZKMy6YiEDZ4pbJyqCSiaA4BWs6Mq8jyf',
+  KASPA: 'kaspa:qzmre59lsdqpd66tvz5wceaw74ez8xj7x2ldvdscxngv0ld4g237v3d4dkmnd',
+  PAXG: '0x5968364A1e1aF7fAEbf8c8AD9805709eF4beb936',
+  SOL: 'C566EL3iLEmEm8GETMzHDQwMPwWmxwiuwnskDyKZpT7u',
+  RENDER: 'C5oLMbkgPHig7YX6yZwiXnpxkPyiNYMYnjz7wLbsCnL1'
 };
 
-// === BTC Balance ===
-app.get('/btc', async (req, res) => {
-  try {
-    const response = await axios.get(`https://mempool.space/api/address/${wallets.btc}`);
-    const balance = response.data.chain_stats.funded_txo_sum - response.data.chain_stats.spent_txo_sum;
-    res.json({ balance: balance / 1e8 });
-  } catch (err) {
-    console.error('BTC fetch error:', err.message);
-    res.status(500).json({ error: 'BTC balance fetch failed' });
-  }
+// Root route - for health check
+app.get('/', (req, res) => {
+  res.send('CAC Proof-of-Reserve Backend is running.');
 });
 
-// === ETH Balance ===
-app.get('/eth', async (req, res) => {
+// Proof-of-Reserve API Route
+app.get('/api/balances', async (req, res) => {
   try {
-    const response = await axios.get(`https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${process.env.ETHERSCAN_API_KEY}`);
-    res.json({ balance: Number(response.data.result) / 1e18 });
-  } catch (err) {
-    console.error('ETH fetch error:', err.message);
-    res.status(500).json({ error: 'ETH balance fetch failed' });
-  }
-});
+    const [
+      btc, eth, usdc, trx, xrp,
+      kaspa, paxg, sol, render
+    ] = await Promise.all([
+      fetchBTC(),
+      fetchETH(),
+      fetchUSDC(),
+      fetchTRX(),
+      fetchXRP(),
+      fetchKASPA(),
+      fetchPAXG(),
+      fetchSOL(),
+      fetchRENDER()
+    ]);
 
-// === USDC Balance ===
-app.get('/usdc', async (req, res) => {
-  try {
-    const url = `https://api.covalenthq.com/v1/1/address/${wallets.usdc}/balances_v2/?&key=${process.env.COVALENT_API_KEY}`;
-    const response = await axios.get(url);
-    const usdc = response.data.data.items.find(token => token.contract_ticker_symbol === 'USDC');
-    res.json({ balance: usdc ? usdc.balance / 1e6 : 0 });
-  } catch (err) {
-    console.error('USDC fetch error:', err.message);
-    res.status(500).json({ error: 'USDC balance fetch failed' });
-  }
-});
-
-// === XRP Balance ===
-app.get('/xrp', async (req, res) => {
-  try {
-    const url = 'https://s1.ripple.com:51234/';
-    const requestData = {
-      method: "account_info",
-      params: [{
-        account: wallets.xrp,
-        ledger_index: "validated",
-        strict: true
-      }]
-    };
-    const response = await axios.post(url, requestData, {
-      headers: { 'Content-Type': 'application/json' }
+    res.json({
+      BTC: btc,
+      ETH: eth,
+      USDC: usdc,
+      TRX: trx,
+      XRP: xrp,
+      KASPA: kaspa,
+      PAXG: paxg,
+      SOL: sol,
+      RENDER: render
     });
-    const balanceData = response.data.result.account_data;
-    const xrpBalance = parseFloat(balanceData.Balance) / 1e6;
-    res.json({ balance: xrpBalance });
-  } catch (err) {
-    console.error('XRP fetch error:', err.message);
-    res.status(500).json({ error: 'XRP balance fetch failed' });
+  } catch (error) {
+    console.error('Balance fetch error:', error.message);
+    res.status(500).json({ error: 'Failed to fetch balances' });
   }
 });
 
-// === PAXG Balance ===
-app.get('/paxg', async (req, res) => {
-  try {
-    const url = `https://api.covalenthq.com/v1/1/address/${wallets.paxg}/balances_v2/?&key=${process.env.COVALENT_API_KEY}`;
-    const response = await axios.get(url);
-    const paxg = response.data.data.items.find(token => token.contract_ticker_symbol === 'PAXG');
-    res.json({ balance: paxg ? paxg.balance / 1e18 : 0 });
-  } catch (err) {
-    console.error('PAXG fetch error:', err.message);
-    res.status(500).json({ error: 'PAXG balance fetch failed' });
-  }
-});
+// === INDIVIDUAL FETCH FUNCTIONS ===
 
-// === TRON Balance ===
-app.get('/tron', async (req, res) => {
-  try {
-    const url = `https://api.trongrid.io/v1/accounts/${wallets.tron}`;
-    const response = await axios.get(url, {
-      headers: { 'TRON-PRO-API-KEY': process.env.TRONGRID_API_KEY }
-    });
-    const balance = response.data.data[0]?.balance || 0;
-    res.json({ balance: balance / 1e6 });
-  } catch (err) {
-    console.error('TRON fetch error:', err.message);
-    res.status(500).json({ error: 'TRON balance fetch failed' });
-  }
-});
+async function fetchBTC() {
+  const url = `https://api.blockchair.com/bitcoin/dashboards/address/${wallets.BTC}?key=${process.env.BLOCKCHAIR_API_KEY}`;
+  const res = await axios.get(url);
+  const satoshis = res.data.data[wallets.BTC].address.balance;
+  return satoshis / 1e8;
+}
 
-// === KASPA Balance using Kaspa REST API ===
-app.get('/kaspa', async (req, res) => {
-  try {
-    const address = wallets.kaspa; // Ensure this includes the 'kaspa:' prefix
-    const response = await axios.get(`https://api.kaspa.org/addresses/kaspa:qzmre59lsdqpd66tvz5wceaw74ez8xj7x2ldvdscxngv0ld4g237v3d4dkmnd/balance
-`);
-    
-    // Log the full response data for debugging
-    console.log('Kaspa response:', response.data);
+async function fetchETH() {
+  const url = `https://api.blockchair.com/ethereum/dashboards/address/${wallets.ETH}?key=${process.env.BLOCKCHAIR_API_KEY}`;
+  const res = await axios.get(url);
+  const wei = res.data.data[wallets.ETH].address.balance;
+  return wei / 1e18;
+}
 
-    if (response.data && response.data.balance) {
-      const balance = response.data.balance; // Balance is in sompi
-      res.json({ balance: balance / 1e8 });  // Convert to KAS
-    } else {
-      res.status(500).json({ error: 'Kaspa balance data not found' });
-    }
-  } catch (err) {
-    console.error('KASPA fetch error:', err.message);
-    res.status(500).json({ error: 'KASPA balance fetch failed' });
-  }
-});
+async function fetchUSDC() {
+  const url = `https://api.covalenthq.com/v1/1/address/${wallets.USDC}/balances_v2/?key=${process.env.COVALENT_API_KEY}`;
+  const res = await axios.get(url);
+  const usdc = res.data.data.items.find(t => t.contract_ticker_symbol === 'USDC');
+  return usdc ? usdc.balance / 1e6 : 0;
+}
 
+async function fetchTRX() {
+  const url = `https://apilist.tronscanapi.com/api/account?address=${wallets.TRX}`;
+  const res = await axios.get(url);
+  return res.data.balance / 1e6;
+}
+
+async function fetchXRP() {
+  const url = `https://api.xrpscan.com/api/v1/account/${wallets.XRP}`;
+  const res = await axios.get(url);
+  return res.data.balance / 1e6;
+}
+
+async function fetchKASPA() {
+  const address = wallets.KASPA.replace('kaspa:', '');
+  const url = `https://api.kaspa.org/addresses/${address}`;
+  const res = await axios.get(url);
+  return res.data.balance / 1e8;
+}
+
+async function fetchPAXG() {
+  const url = `https://api.covalenthq.com/v1/1/address/${wallets.PAXG}/balances_v2/?key=${process.env.COVALENT_API_KEY}`;
+  const res = await axios.get(url);
+  const paxg = res.data.data.items.find(t => t.contract_ticker_symbol === 'PAXG');
+  return paxg ? paxg.balance / 1e18 : 0;
+}
+
+async function fetchSOL() {
+  const url = `https://api.helius.xyz/v0/addresses/${wallets.SOL}/balances?api-key=${process.env.HELIUS_API_KEY}`;
+  const res = await axios.get(url);
+  const sol = res.data.nativeBalance;
+  return sol ? sol.lamports / 1e9 : 0;
+}
+
+async function fetchRENDER() {
+  const url = `https://api.helius.xyz/v0/addresses/${wallets.RENDER}/tokens?api-key=${process.env.HELIUS_API_KEY}`;
+  const res = await axios.get(url);
+  const render = res.data.find(t => t.tokenInfo.symbol === 'RNDR');
+  return render ? render.tokenAmount.uiAmount : 0;
+}
+
+// Start the server
 app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+  console.log(`✅ CAC Proof-of-Reserve Backend is running on port ${PORT}`);
 });
