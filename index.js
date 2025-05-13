@@ -21,30 +21,33 @@ const wallets = {
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const COVALENT_API_KEY = process.env.COVALENT_API_KEY;
+const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
 
   try {
-    // BTC (Blockchair)
-    const btcRes = await axios.get(`https://api.blockchair.com/bitcoin/dashboards/address/${wallets.btc}`);
-    results.btc = btcRes.data.data[wallets.btc].address.balance / 1e8;
+    // ✅ BTC using Blockstream.info
+    const btcRes = await axios.get(`https://blockstream.info/api/address/${wallets.btc}`);
+    results.btc = btcRes.data.chain_stats.funded_txo_sum / 1e8 - btcRes.data.chain_stats.spent_txo_sum / 1e8;
   } catch (err) {
     console.error('BTC fetch error:', err.message);
     results.btc = null;
   }
 
   try {
-    // ETH
-    const ethRes = await axios.get(`https://api.blockchair.com/ethereum/dashboards/address/${wallets.eth}`);
-    results.eth = ethRes.data.data[wallets.eth].address.balance / 1e18;
+    // ✅ ETH using Etherscan
+    const ethRes = await axios.get(
+      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${ETHERSCAN_API_KEY}`
+    );
+    results.eth = parseFloat(ethRes.data.result) / 1e18;
   } catch (err) {
     console.error('ETH fetch error:', err.message);
     results.eth = null;
   }
 
   try {
-    // TRON
+    // TRX using Tronscan
     const trxRes = await axios.get(`https://apilist.tronscanapi.com/api/account?address=${wallets.trx}`);
     results.trx = trxRes.data.balance / 1e6;
   } catch (err) {
@@ -53,7 +56,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
-    // XRP
+    // XRP using Ripple public JSON-RPC
     const xrpRes = await axios.post('https://s1.ripple.com:51234/', {
       method: 'account_info',
       params: [{ account: wallets.xrp, ledger_index: 'validated', strict: true }]
@@ -65,7 +68,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
-    // USDC via Covalent
+    // USDC using Covalent
     const usdcRes = await axios.get(
       `https://api.covalenthq.com/v1/1/address/${wallets.usdc}/balances_v2/?key=${COVALENT_API_KEY}`
     );
@@ -77,7 +80,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
-    // PAXG via Covalent
+    // PAXG using Covalent
     const paxgRes = await axios.get(
       `https://api.covalenthq.com/v1/1/address/${wallets.paxg}/balances_v2/?key=${COVALENT_API_KEY}`
     );
@@ -89,7 +92,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
-    // Solana
+    // SOL using Helius
     const solanaRes = await axios.post(
       `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
       {
@@ -139,7 +142,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
-    // ✅ Fixed KASPA fetch using Kaspa.org API
+    // ✅ KASPA using Kaspa.org
     const kaspaRes = await axios.get(`https://api.kaspa.org/addresses/${wallets.kaspa}/balance`);
     if (kaspaRes.data && kaspaRes.data.balance) {
       results.kaspa = kaspaRes.data.balance / 1e8;
@@ -155,5 +158,5 @@ app.get('/api/balances', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`CAC Proof-of-Reserve Backend is running on port ${PORT}`);
+  console.log(`CAC Proof-of-Reserve Backend running on port ${PORT}`);
 });
