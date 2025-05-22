@@ -150,14 +150,14 @@ app.get('/api/balances', async (req, res) => {
   res.json(results);
 });
 
-// ✅ Correct update-price endpoint using shared logic
+// === USD per CAC Endpoint ===
 app.get('/api/update-price', async (req, res) => {
   try {
-    const usdPerCac = await calculateUsdPerCac();
-    res.send(`📈 USD per CAC: $${usdPerCac.toFixed(4)}`);
+    const price = await calculateUsdPerCac();
+    res.send(`📈 USD per CAC: $${price.toFixed(4)}`);
   } catch (err) {
     console.error('Update price error:', err.message);
-    res.status(500).send('Failed to calculate price.');
+    res.status(500).send('❌ Failed to calculate CAC price.');
   }
 });
 
