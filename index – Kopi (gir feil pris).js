@@ -3,8 +3,6 @@ const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
 
-const { calculateUsdPerCac } = require('./updatePrice');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(cors());
@@ -150,14 +148,30 @@ app.get('/api/balances', async (req, res) => {
   res.json(results);
 });
 
-// ✅ Correct update-price endpoint using shared logic
+
+// ✅ NEW: Update Price Endpoint
 app.get('/api/update-price', async (req, res) => {
   try {
-    const usdPerCac = await calculateUsdPerCac();
+    // Example logic — replace this with your real logic
+    const tokens = [
+      { symbol: 'btc', price: 65000 },
+      { symbol: 'eth', price: 3000 }
+    ];
+
+    // Example fallback simulation
+    const missing = tokens.find(t => t.price == null);
+    if (missing) {
+      return res.status(500).send(`Error fetching ${missing.symbol.toUpperCase()} data`);
+    }
+
+    const totalValue = tokens.reduce((sum, t) => sum + t.price, 0);
+    const supply = 25000000; // Example total CAC supply
+    const usdPerCac = totalValue / supply;
+
     res.send(`📈 USD per CAC: $${usdPerCac.toFixed(4)}`);
   } catch (err) {
     console.error('Update price error:', err.message);
-    res.status(500).send('Failed to calculate price.');
+    res.status(500).send('Failed to update price.');
   }
 });
 

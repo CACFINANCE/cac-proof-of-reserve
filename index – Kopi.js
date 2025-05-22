@@ -3,8 +3,6 @@ const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
 
-const { calculateUsdPerCac } = require('./updatePrice');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(cors());
@@ -29,6 +27,7 @@ app.get('/api/balances', async (req, res) => {
   const results = {};
 
   try {
+    // ✅ BTC using Blockstream.info
     const btcRes = await axios.get(`https://blockstream.info/api/address/${wallets.btc}`);
     results.btc = btcRes.data.chain_stats.funded_txo_sum / 1e8 - btcRes.data.chain_stats.spent_txo_sum / 1e8;
   } catch (err) {
@@ -37,6 +36,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
+    // ✅ ETH using Etherscan
     const ethRes = await axios.get(
       `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${ETHERSCAN_API_KEY}`
     );
@@ -47,6 +47,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
+    // TRX using Tronscan
     const trxRes = await axios.get(`https://apilist.tronscanapi.com/api/account?address=${wallets.trx}`);
     results.trx = trxRes.data.balance / 1e6;
   } catch (err) {
@@ -55,6 +56,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
+    // XRP using Ripple public JSON-RPC
     const xrpRes = await axios.post('https://s1.ripple.com:51234/', {
       method: 'account_info',
       params: [{ account: wallets.xrp, ledger_index: 'validated', strict: true }]
@@ -66,6 +68,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
+    // USDC using Covalent
     const usdcRes = await axios.get(
       `https://api.covalenthq.com/v1/1/address/${wallets.usdc}/balances_v2/?key=${COVALENT_API_KEY}`
     );
@@ -77,6 +80,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
+    // PAXG using Covalent
     const paxgRes = await axios.get(
       `https://api.covalenthq.com/v1/1/address/${wallets.paxg}/balances_v2/?key=${COVALENT_API_KEY}`
     );
@@ -88,6 +92,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
+    // SOL using Helius
     const solanaRes = await axios.post(
       `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
       {
@@ -104,6 +109,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
+    // RNDR on Solana
     const renderRes = await axios.post(
       `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
       {
@@ -136,6 +142,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
+    // ✅ KASPA using Kaspa.org
     const kaspaRes = await axios.get(`https://api.kaspa.org/addresses/${wallets.kaspa}/balance`);
     if (kaspaRes.data && kaspaRes.data.balance) {
       results.kaspa = kaspaRes.data.balance / 1e8;
@@ -148,17 +155,6 @@ app.get('/api/balances', async (req, res) => {
   }
 
   res.json(results);
-});
-
-// ✅ Correct update-price endpoint using shared logic
-app.get('/api/update-price', async (req, res) => {
-  try {
-    const usdPerCac = await calculateUsdPerCac();
-    res.send(`📈 USD per CAC: $${usdPerCac.toFixed(4)}`);
-  } catch (err) {
-    console.error('Update price error:', err.message);
-    res.status(500).send('Failed to calculate price.');
-  }
 });
 
 app.listen(PORT, () => {

@@ -2,9 +2,9 @@
   "name": "cac-backend",
   "version": "1.0.0",
   "description": "Backend for CAC proof-of-reserve and minting system",
-  "main": "updatePrice.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node updatePrice.js"
+    "start": "index.js"
 
   },
   "dependencies": {
