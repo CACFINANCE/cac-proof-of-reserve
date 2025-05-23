@@ -57,9 +57,10 @@ async function retry(fn, maxAttempts = 3, delay = 1000) {
       }
       if (status === 429) {
         console.warn(`⏳ Rate limited (429) - retrying in 10s...`);
-        await new Promise(res => setTimeout(res, 10000));
+        await new Promise((res) => setTimeout(res, 10000));
       } else if (attempt < maxAttempts) {
-        await new Promise(res => setTimeout(res, delay * attempt));
+        console.warn(`⚠️ Attempt ${attempt} failed, retrying in ${delay * attempt}ms...`);
+        await new Promise((res) => setTimeout(res, delay * attempt));
       } else {
         throw err;
       }
@@ -89,23 +90,33 @@ async function fetchTotalSupplyFromEtherscan() {
 async function calculateUsdPerCac() {
   const now = Date.now();
   if (cachedPrice && now - lastFetched < CACHE_DURATION_MS) {
+    // Using cached price
     return { price: cachedPrice };
   }
+
+  console.log("🔄 Calculating new CAC price...");
 
   const provider = new ethers.JsonRpcProvider(RPC_URL);
   const signer = new ethers.Wallet(PRIVATE_KEY, provider);
   const contract = new ethers.Contract(CAC_RESERVE_SEPOLIA, CAC_RESERVE_ABI, signer);
 
-  // Fetch token balances from backend
-  const balancesRes = await retry(() => axios.get(BACKEND_URL));
+  // Fetch token balances from backend with retries and increased timeout
+  const balancesRes = await retry(async () => {
+    console.log("🌐 Fetching token balances from backend...");
+    const response = await axios.get(BACKEND_URL, { timeout: 15000 }); // 15 seconds timeout
+    console.log("✅ Balances fetched successfully");
+    return response;
+  });
+
   const balances = balancesRes.data;
 
-  // CoinGecko request
+  // Build CoinGecko ids string for price fetch
   const ids = Object.keys(balances)
     .map((token) => COINGECKO_IDS[token.toLowerCase()])
     .filter(Boolean)
     .join(",");
 
+  // Fetch prices from CoinGecko with retries
   const priceRes = await retry(() =>
     axios.get("https://api.coingecko.com/api/v3/simple/price", {
       params: { ids, vs_currencies: "usd" },
@@ -121,7 +132,7 @@ async function calculateUsdPerCac() {
     const price = prices[id]?.usd;
 
     if (!price) {
-      console.error(`⚠️ Missing price for ${token.toUpperCase()} (${id})`);
+      console.warn(`⚠️ Missing price for ${token.toUpperCase()} (${id})`);
       missingPrices.push(token.toUpperCase());
       continue;
     }
@@ -147,7 +158,7 @@ async function calculateUsdPerCac() {
 
   const finalPrice = totalReserveUSD / totalSupply;
 
-  // Cache it
+  // Cache price
   cachedPrice = finalPrice;
   lastFetched = Date.now();
 
@@ -161,7 +172,7 @@ if (require.main === module) {
       console.log(JSON.stringify({ price: price.toFixed(6) }));
     })
     .catch((err) => {
-      console.error("Update price error:", err.message || err);
+      console.error("❌ Update price error:", err.message || err);
       console.log(JSON.stringify({ error: "Failed to calculate CAC price." }));
     });
 }
