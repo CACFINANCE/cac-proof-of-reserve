@@ -38,10 +38,10 @@ const CAC_RESERVE_ABI = [
   },
 ];
 
-// Cache setup: 2 minutes TTL
+// Cache setup: 3 minutes TTL
 let cachedPrice = null;
 let cachedAt = 0;
-const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+const CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 
 async function retry(fn, maxAttempts = 3, delay = 1000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -73,22 +73,33 @@ async function fetchTotalSupplyFromEtherscan() {
   return BigInt(res.data.result);
 }
 
+/**
+ * Calculates USD price per CAC token.
+ * Uses caching for 3 minutes.
+ * On failure, returns stale cached price if available with stale=true.
+ * 
+ * @returns {Promise<{price: number, stale: boolean}>}
+ */
 async function calculateUsdPerCac() {
   const now = Date.now();
 
+  // Return cached if fresh
   if (cachedPrice && now - cachedAt < CACHE_TTL) {
     return { price: cachedPrice, stale: false };
   }
 
   try {
+    // Fetch balances from backend
     const balancesRes = await retry(() => axios.get(BACKEND_URL));
     const balances = balancesRes.data;
 
+    // Prepare CoinGecko ids
     const ids = Object.keys(balances)
       .map((token) => COINGECKO_IDS[token.toLowerCase()])
       .filter(Boolean)
       .join(",");
 
+    // Fetch prices from CoinGecko
     const priceRes = await retry(() =>
       axios.get("https://api.coingecko.com/api/v3/simple/price", {
         params: { ids, vs_currencies: "usd" },
@@ -115,12 +126,14 @@ async function calculateUsdPerCac() {
 
     if (totalReserveUSD <= 0) throw new Error("Total reserve is zero.");
 
+    // Fetch total supply from Etherscan
     const totalSupplyRaw = await fetchTotalSupplyFromEtherscan();
     const totalSupply = parseFloat(ethers.formatUnits(totalSupplyRaw, 8));
     if (totalSupply <= 0) throw new Error("Total CAC supply is zero.");
 
     const finalPrice = totalReserveUSD / totalSupply;
 
+    // Update cache
     cachedPrice = finalPrice;
     cachedAt = Date.now();
 
@@ -128,13 +141,17 @@ async function calculateUsdPerCac() {
   } catch (err) {
     console.error("❌ Price calculation error:", err.message);
 
+    // Return stale cached price if available
     if (cachedPrice) {
       return { price: cachedPrice, stale: true };
     }
+
+    // No cached price, rethrow
     throw err;
   }
 }
 
+// CLI support - outputs clean JSON with only price string (6 decimals)
 if (require.main === module) {
   calculateUsdPerCac()
     .then(({ price }) => {
@@ -148,5 +165,3 @@ if (require.main === module) {
 
 // === Export for reuse in index.js
 module.exports = { calculateUsdPerCac };
-
-
