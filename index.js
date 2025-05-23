@@ -154,10 +154,10 @@ app.get('/api/balances', async (req, res) => {
 app.get('/api/update-price', async (req, res) => {
   try {
     const price = await calculateUsdPerCac();
-    res.send(`📈 USD per CAC: $${price.toFixed(4)}`);
+    res.json({ price: price.toFixed(6) }); // valid JSON response
   } catch (err) {
     console.error('Update price error:', err.message);
-    res.status(500).send('❌ Failed to calculate CAC price.');
+    res.status(500).json({ error: 'Failed to calculate CAC price.' });
   }
 });
 
