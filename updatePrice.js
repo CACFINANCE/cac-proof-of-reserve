@@ -1,306 +1,175 @@
-require('dotenv').config();
-const axios = require('axios');
-const Redis = require('ioredis');
+require("dotenv").config();
+const axios = require("axios");
+const { ethers } = require("ethers");
 
-// Connect to Upstash Redis
-const redis = new Redis(process.env.UPSTASH_REDIS_REST_URL, {
-  password: process.env.UPSTASH_REDIS_REST_TOKEN,
-  tls: {},
-});
+// === CONFIG ===
+const RPC_URL = process.env.RPC_URL_PRIMARY;
+const PRIVATE_KEY = process.env.PRIVATE_KEY;
 
-const CACHE_KEY = 'cac_price_cache';
-const CACHE_TTL = 60; // Cache price for 60 seconds
+const CAC_MAINNET_CONTRACT = "0xaE811d6CE4ca45Dfd4874d95CCB949312F909a21";
+const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
+const BACKEND_URL = "https://cac-backend-2i3y.onrender.com/api/balances";
 
-// Wallet addresses
-const solanaWallet = 'C566EL3iLEmEm8GETMzHDQwMPwWmxwiuwnskDyKZpT7u';
-const renderWallet = 'C5oLMbkgPHig7YX6yZwiXnpxkPyiNYMYnjz7wLbsCnL1';
-const renderMint = 'rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof';
-const btcWallet = 'bc1qjfg46f6ru9h6wrdejkqa6um8496lpls59knsr7';
-const ethWallet = '0xc199a4e487Fb1eB5a03f16e56CB970338f2cC0cb';
-const tronWallet = 'TEK2WDVsMVxogtQGfVA6WwboidawRr69oy';
-const xrpWallet = 'rNZKMy6YiEDZ4pbJyqCSiaA4BWs6Mq8jyf';
-const kasWallet = 'qzmre59lsdqpd66tvz5wceaw74ez8xj7x2ldvdscxngv0ld4g237v3d4dkmnd';
-const paxgWallet = '0x5968364A1e1aF7fAEbf8c8AD9805709eF4beb936';
-const usdcWallet = '0xf3d71E003dD5C38B2E797a3fed0Aa1ac92dB1266';
+const CAC_RESERVE_SEPOLIA = "0xEd9218734bb090daf07226D5B56cf1266208f943";
+const CAC_RESERVE_ABI = [
+  {
+    inputs: [{ internalType: "uint256", name: "usdPerToken", type: "uint256" }],
+    name: "setUsdPerToken",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "owner",
+    outputs: [{ internalType: "address", name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+];
 
-// API Keys
-const COVALENT_API_KEY = process.env.COVALENT_API_KEY;
-const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-
-// --- BALANCE FETCH FUNCTIONS ---
-
-// SOLANA balance via Helius RPC
-async function fetchSolanaBalance() {
-  const url = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
-  try {
-    const body = {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'getBalance',
-      params: [solanaWallet],
-    };
-    const res = await axios.post(url, body, { headers: { 'Content-Type': 'application/json' } });
-    return res.data.result.value / 1e9;
-  } catch (err) {
-    console.error('SOL fetch error:', err.message);
-    throw new Error('SOL balance fetch failed');
-  }
-}
-
-// Render token balance on Solana
-async function fetchRenderBalance() {
-  const url = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
-  try {
-    const body = {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'getTokenAccountsByOwner',
-      params: [
-        renderWallet,
-        { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' },
-        { encoding: 'jsonParsed' },
-      ],
-    };
-    const res = await axios.post(url, body, { headers: { 'Content-Type': 'application/json' } });
-    const accounts = res.data.result.value;
-    let total = 0;
-    for (const acc of accounts) {
-      const info = acc.account.data.parsed.info;
-      if (info.mint === renderMint) {
-        total += parseFloat(info.tokenAmount.uiAmount);
-      }
-    }
-    return total;
-  } catch (err) {
-    console.error('RNDR fetch error:', err.message);
-    throw new Error('RNDR balance fetch failed');
-  }
-}
-
-// USDC balance on Ethereum (via Covalent)
-async function fetchUSDCBalance() {
-  try {
-    const url = `https://api.covalenthq.com/v1/1/address/${usdcWallet}/balances_v2/?key=${COVALENT_API_KEY}`;
-    const res = await axios.get(url);
-    const usdcData = res.data.data.items.find((item) => item.contract_ticker_symbol === 'USDC');
-    return usdcData ? parseFloat(usdcData.balance) / 1e6 : 0;
-  } catch (err) {
-    console.error('USDC fetch error:', err.message);
-    throw new Error('USDC balance fetch failed');
-  }
-}
-
-// BTC balance (via BlockCypher)
-async function fetchBTCBalance() {
-  try {
-    const res = await axios.get(`https://api.blockcypher.com/v1/btc/main/addrs/${btcWallet}/balance`);
-    return res.data.final_balance / 1e8;
-  } catch (err) {
-    console.error('BTC fetch error:', err.message);
-    throw new Error('BTC balance fetch failed');
-  }
-}
-
-// ETH balance (via Covalent)
-async function fetchETHBalance() {
-  try {
-    const url = `https://api.covalenthq.com/v1/eth-mainnet/address/${ethWallet}/balances_v2/?key=${COVALENT_API_KEY}`;
-    const res = await axios.get(url);
-    const ethData = res.data.data.items.find((item) => item.contract_ticker_symbol === 'ETH');
-    return ethData ? parseFloat(ethData.balance) / 1e18 : 0;
-  } catch (err) {
-    console.error('ETH fetch error:', err.message);
-    throw new Error('ETH balance fetch failed');
-  }
-}
-
-// TRX balance (via Tronscan)
-async function fetchTRXBalance() {
-  try {
-    const url = `https://apilist.tronscanapi.com/api/account?address=${tronWallet}`;
-    const res = await axios.get(url);
-    return parseFloat(res.data.balance) / 1e6;
-  } catch (err) {
-    console.error('TRX fetch error:', err.message);
-    throw new Error('TRX balance fetch failed');
-  }
-}
-
-// XRP balance (via Ripple API)
-async function fetchXRPBalance() {
-  try {
-    const url = 'https://s1.ripple.com:51234/';
-    const res = await axios.post(url, {
-      method: 'account_info',
-      params: [{ account: xrpWallet, ledger_index: 'validated' }],
-    });
-    const drops = res.data.result?.account_data?.Balance;
-    return drops ? parseFloat(drops) / 1e6 : 0;
-  } catch (err) {
-    console.error('XRP fetch error:', err.message);
-    throw new Error('XRP balance fetch failed');
-  }
-}
-
-// KASPA balance (via kaspa.org API)
-async function fetchKASBalance() {
-  try {
-    const res = await axios.get(`https://api.kaspa.org/addresses/${kasWallet}`);
-    return parseFloat(res.data.balance.confirmed);
-  } catch (err) {
-    console.error('KASPA fetch error:', err.message);
-    throw new Error('KASPA balance fetch failed');
-  }
-}
-
-// PAXG balance (via Covalent)
-async function fetchPAXGBalance() {
-  try {
-    const url = `https://api.covalenthq.com/v1/1/address/${paxgWallet}/balances_v2/?key=${COVALENT_API_KEY}`;
-    const res = await axios.get(url);
-    const paxgData = res.data.data.items.find((item) => item.contract_ticker_symbol === 'PAXG');
-    return paxgData ? parseFloat(paxgData.balance) / 1e18 : 0;
-  } catch (err) {
-    console.error('PAXG fetch error:', err.message);
-    throw new Error('PAXG balance fetch failed');
-  }
-}
-
-// --- PRICE FETCH FUNCTIONS ---
-
-// Fetch price for given CoinGecko id
-async function fetchPrice(id) {
-  try {
-    const res = await axios.get(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd`
-    );
-    return res.data[id]?.usd || 0;
-  } catch (err) {
-    console.error(`Price fetch error for ${id}:`, err.message);
-    return 0;
-  }
-}
-
-// --- CAC PRICE CALCULATION ---
-
-async function calculateUsdPerCac() {
-  // Fetch all balances in parallel
-  const [
-    sol,
-    render,
-    usdc,
-    btc,
-    eth,
-    trx,
-    xrp,
-    kas,
-    paxg,
-  ] = await Promise.all([
-    fetchSolanaBalance(),
-    fetchRenderBalance(),
-    fetchUSDCBalance(),
-    fetchBTCBalance(),
-    fetchETHBalance(),
-    fetchTRXBalance(),
-    fetchXRPBalance(),
-    fetchKASBalance(),
-    fetchPAXGBalance(),
-  ]);
-
-  // Fetch all prices in parallel (CoinGecko IDs)
-  const [
-    solPrice,
-    renderPrice,
-    usdcPrice,
-    btcPrice,
-    ethPrice,
-    trxPrice,
-    xrpPrice,
-    kasPrice,
-    paxgPrice,
-  ] = await Promise.all([
-    fetchPrice('solana'),
-    fetchPrice('render-token'),
-    fetchPrice('usd-coin'),
-    fetchPrice('bitcoin'),
-    fetchPrice('ethereum'),
-    fetchPrice('tron'),
-    fetchPrice('ripple'),
-    fetchPrice('kaspa'),
-    fetchPrice('pax-gold'),
-  ]);
-
-  // Calculate total USD value of all assets backing CAC
-  const totalUsdValue =
-    sol * solPrice +
-    render * renderPrice +
-    usdc * usdcPrice +
-    btc * btcPrice +
-    eth * ethPrice +
-    trx * trxPrice +
-    xrp * xrpPrice +
-    kas * kasPrice +
-    paxg * paxgPrice;
-
-  // TODO: Replace this with actual CAC total supply fetch from your contract/backend
-  // For now, hardcode or fetch externally
-  const cacTotalSupply = 1000000; // <-- Replace with real supply
-
-  if (!cacTotalSupply || cacTotalSupply <= 0) {
-    throw new Error('Invalid CAC total supply');
-  }
-
-  // Calculate CAC price = total backing USD / total supply tokens
-  const price = totalUsdValue / cacTotalSupply;
-
-  return { price };
-}
-
-// --- REDIS CACHE LAYER ---
-
-async function getCachedCacPrice() {
-  try {
-    // Try to get cached price
-    const cached = await redis.get(CACHE_KEY);
-    if (cached) {
-      const { price, timestamp } = JSON.parse(cached);
-      // Return cached if fresh
-      if (Date.now() - timestamp < CACHE_TTL * 1000) {
-        return { price, cached: true };
-      }
-    }
-
-    // Otherwise calculate fresh price
-    const { price } = await calculateUsdPerCac();
-
-    // Cache price with timestamp and TTL
-    await redis.set(
-      CACHE_KEY,
-      JSON.stringify({ price, timestamp: Date.now() }),
-      'EX',
-      CACHE_TTL
-    );
-
-    return { price, cached: false };
-  } catch (err) {
-    console.error('Error fetching cached price:', err.message);
-
-    // Fallback to last cached price ignoring TTL
-    try {
-      const fallback = await redis.get(CACHE_KEY);
-      if (fallback) {
-        const { price, timestamp } = JSON.parse(fallback);
-        return { price, cached: true, timestamp };
-      }
-    } catch (fallbackErr) {
-      console.error('Redis fallback error:', fallbackErr.message);
-    }
-
-    throw new Error('Failed to get CAC price');
-  }
-}
-
-module.exports = {
-  calculateUsdPerCac,
-  getCachedCacPrice,
+const COINGECKO_IDS = {
+  btc: "bitcoin",
+  eth: "ethereum",
+  trx: "tron",
+  xrp: "ripple",
+  usdc: "usd-coin",
+  paxg: "pax-gold",
+  sol: "solana",
+  rndr: "render-token",
+  kaspa: "kaspa",
 };
+
+// === Caching mechanism ===
+let cachedPrice = null;
+let lastFetched = 0;
+const CACHE_DURATION_MS = 3 * 60 * 1000; // 3 minutes
+
+// === Retry wrapper with backoff ===
+async function retry(fn, maxAttempts = 3, delay = 1000) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 403) {
+        console.error("⚠️ TRX fetch error: Request blocked (403)");
+      }
+      if (status === 429) {
+        console.warn(`⏳ Rate limited (429) - retrying in 10s...`);
+        await new Promise(res => setTimeout(res, 10000));
+      } else if (attempt < maxAttempts) {
+        await new Promise(res => setTimeout(res, delay * attempt));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
+const AXIOS_CONFIG = { timeout: 15000 };
+
+// === Fetch CAC total supply from Etherscan ===
+async function fetchTotalSupplyFromEtherscan() {
+  const res = await axios.get("https://api.etherscan.io/api", {
+    params: {
+      module: "stats",
+      action: "tokensupply",
+      contractaddress: CAC_MAINNET_CONTRACT,
+      apikey: ETHERSCAN_API_KEY,
+    },
+    ...AXIOS_CONFIG,
+  });
+
+  if (res.data.status !== "1" || !res.data.result) {
+    throw new Error(`Etherscan error: ${res.data.message || "Unknown error"}`);
+  }
+
+  return BigInt(res.data.result);
+}
+
+// === Calculate USD per CAC token ===
+async function calculateUsdPerCac() {
+  const now = Date.now();
+  if (cachedPrice && now - lastFetched < CACHE_DURATION_MS) {
+    return { price: cachedPrice };
+  }
+
+  console.log("🔄 Calculating new CAC price...");
+
+  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+  const contract = new ethers.Contract(CAC_RESERVE_SEPOLIA, CAC_RESERVE_ABI, signer);
+
+  console.log("🌐 Fetching token balances from backend...");
+  const balancesRes = await retry(() => axios.get(BACKEND_URL, AXIOS_CONFIG));
+  const balances = balancesRes.data;
+
+  const ids = Object.keys(balances)
+    .map((token) => COINGECKO_IDS[token.toLowerCase()])
+    .filter(Boolean)
+    .join(",");
+
+  console.log("💱 Fetching prices from CoinGecko...");
+  const priceRes = await retry(() =>
+    axios.get("https://api.coingecko.com/api/v3/simple/price", {
+      params: { ids, vs_currencies: "usd" },
+      ...AXIOS_CONFIG,
+    })
+  );
+  const prices = priceRes.data;
+
+  let totalReserveUSD = 0;
+  let missingPrices = [];
+
+  for (const [token, balance] of Object.entries(balances)) {
+    const id = COINGECKO_IDS[token.toLowerCase()];
+    const price = prices[id]?.usd;
+
+    if (!price) {
+      console.error(`⚠️ Missing price for ${token.toUpperCase()} (${id})`);
+      missingPrices.push(token.toUpperCase());
+      continue;
+    }
+
+    totalReserveUSD += balance * price;
+  }
+
+  if (missingPrices.length > 0) {
+    throw new Error(`Missing prices for: ${missingPrices.join(", ")}`);
+  }
+
+  if (totalReserveUSD <= 0) {
+    throw new Error("Total reserve is zero.");
+  }
+
+  console.log("📦 Fetching CAC total supply...");
+  const totalSupplyRaw = await fetchTotalSupplyFromEtherscan();
+  const totalSupply = parseFloat(ethers.formatUnits(totalSupplyRaw, 8));
+
+  if (totalSupply <= 0) {
+    throw new Error("Total CAC supply is zero.");
+  }
+
+  const finalPrice = totalReserveUSD / totalSupply;
+
+  cachedPrice = finalPrice;
+  lastFetched = Date.now();
+
+  return { price: finalPrice };
+}
+
+// === CLI run support ===
+if (require.main === module) {
+  calculateUsdPerCac()
+    .then(({ price }) => {
+      console.log(JSON.stringify({ price: price.toFixed(6) }));
+    })
+    .catch((err) => {
+      console.error("Update price error:", err.message || err);
+      console.log(JSON.stringify({ error: "Failed to calculate CAC price." }));
+    });
+}
+
+// === Export for reuse in index.js
+module.exports = { calculateUsdPerCac };
