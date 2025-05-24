@@ -1,9 +1,6 @@
 const express = require("express");
 const axios = require("axios");
-const axiosRetry = require("axios-retry");
 const cors = require("cors");
-const fs = require("fs");
-const path = require("path");
 require("dotenv").config();
 
 const { calculateUsdPerCac } = require("./updatePrice");
@@ -11,8 +8,6 @@ const { calculateUsdPerCac } = require("./updatePrice");
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(cors());
-
-axiosRetry(axios, { retries: 2, retryDelay: axiosRetry.exponentialDelay });
 
 const wallets = {
   btc: "bc1qjfg46f6ru9h6wrdejkqa6um8496lpls59knsr7",
@@ -28,22 +23,14 @@ const wallets = {
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
-const CACHE_FILE = path.resolve(__dirname, "cached_price.json");
 
 if (!HELIUS_API_KEY || !ETHERSCAN_API_KEY) {
   console.error("Missing required API keys in .env");
   process.exit(1);
 }
 
-let cachedBalances = null;
-let balancesTimestamp = 0;
-const BALANCES_CACHE_TTL = 60 * 1000;
-
+// /api/balances returns wallet balances, no caching
 app.get("/api/balances", async (req, res) => {
-  if (Date.now() - balancesTimestamp < BALANCES_CACHE_TTL && cachedBalances) {
-    return res.json({ ...cachedBalances, cached: true });
-  }
-
   const results = {};
 
   try {
@@ -83,7 +70,11 @@ app.get("/api/balances", async (req, res) => {
     results.xrp = null;
   }
 
+  // For USDC and PAXG, fetch balances using CoinGecko API token balances via Ethereum wallet address
   try {
+    // USDC balance - on Ethereum network ERC20
+    // We'll fetch USDC token balance using Etherscan as it was before, but you requested Coingecko for price only,
+    // balances remain from chain so leave Etherscan for balance
     const usdcRes = await axios.get(
       `https://api.etherscan.io/api?module=account&action=tokenbalance&contractaddress=0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48&address=${wallets.usdc}&tag=latest&apikey=${ETHERSCAN_API_KEY}`
     );
@@ -163,39 +154,17 @@ app.get("/api/balances", async (req, res) => {
     results.kaspa = null;
   }
 
-  cachedBalances = results;
-  balancesTimestamp = Date.now();
-
   res.json(results);
 });
 
-let cachedPrice = null;
-let priceTimestamp = 0;
-const PRICE_CACHE_TTL = 60 * 1000;
-
+// /api/update-price calls external updatePrice.js function to calculate CAC price
 app.get("/api/update-price", async (req, res) => {
-  const overrideTTL = req.query.force !== "true";
-  if (overrideTTL && Date.now() - priceTimestamp < PRICE_CACHE_TTL && cachedPrice !== null) {
-    return res.json({ price: cachedPrice.toFixed(6), cached: true });
-  }
-
   try {
     const { price } = await calculateUsdPerCac();
-    cachedPrice = price;
-    priceTimestamp = Date.now();
-    fs.writeFileSync(CACHE_FILE, JSON.stringify({ price: price.toFixed(6), timestamp: priceTimestamp }));
-    return res.json({ price: price.toFixed(6) });
+    res.json({ price: price.toFixed(6) });
   } catch (err) {
-    console.error("⚠️ Primary price fetch failed, using fallback...");
-
-    try {
-      const cached = fs.readFileSync(CACHE_FILE, "utf8");
-      const { price, timestamp } = JSON.parse(cached);
-      return res.json({ price, cached: true, timestamp });
-    } catch (fallbackErr) {
-      console.error("❌ Fallback also failed:", fallbackErr.message);
-      return res.status(500).json({ error: "Failed to calculate CAC price." });
-    }
+    console.error("Error calculating CAC price:", err.message);
+    res.status(500).json({ error: "Failed to calculate CAC price." });
   }
 });
 

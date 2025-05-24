@@ -99,7 +99,6 @@ async function calculateUsdPerCac() {
 
   const provider = new ethers.JsonRpcProvider(RPC_URL);
   const signer = new ethers.Wallet(PRIVATE_KEY, provider);
-  const contract = new ethers.Contract(CAC_RESERVE_SEPOLIA, CAC_RESERVE_ABI, signer);
 
   console.log("🌐 Fetching token balances from backend...");
   const balancesRes = await retry(() => axios.get(BACKEND_URL, AXIOS_CONFIG));
