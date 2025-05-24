@@ -1,10 +1,13 @@
 require("dotenv").config();
 const axios = require("axios");
 const { ethers } = require("ethers");
+const fs = require("fs");
+const path = require("path");
 
 // === CONFIG ===
 const RPC_URL = process.env.RPC_URL_PRIMARY;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const CACHE_FILE = path.resolve(__dirname, "cached_price.json");
 
 const CAC_MAINNET_CONTRACT = "0xaE811d6CE4ca45Dfd4874d95CCB949312F909a21";
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
@@ -155,6 +158,13 @@ async function calculateUsdPerCac() {
 
   cachedPrice = finalPrice;
   lastFetched = Date.now();
+
+  // Write to cache file
+  const cacheData = {
+    price: finalPrice.toFixed(6),
+    timestamp: new Date().toISOString(),
+  };
+  fs.writeFileSync(CACHE_FILE, JSON.stringify(cacheData, null, 2));
 
   return { price: finalPrice };
 }
