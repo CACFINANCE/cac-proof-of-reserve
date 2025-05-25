@@ -23,7 +23,16 @@ const wallets = {
 };
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
+const RPC_URL_PRIMARY = process.env.RPC_URL_PRIMARY;
+
+// ERC-20 ABI fragment for balanceOf
+const ERC20_ABI = [
+  'function balanceOf(address) view returns (uint256)',
+  'function decimals() view returns (uint8)'
+];
+
+// Initialize ethers provider
+const provider = new ethers.JsonRpcProvider(RPC_URL_PRIMARY);
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -38,7 +47,7 @@ app.get('/api/balances', async (req, res) => {
 
   try {
     const ethRes = await axios.get(
-      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${ETHERSCAN_API_KEY}`
+      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${process.env.ETHERSCAN_API_KEY}`
     );
     results.eth = parseFloat(ethRes.data.result) / 1e18;
   } catch (err) {
@@ -65,23 +74,25 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
-  // === USDC via Etherscan ===
+  // USDC via Infura RPC
   try {
-    const usdcRes = await axios.get(
-      `https://api.etherscan.io/api?module=account&action=tokenbalance&contractaddress=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48&address=${wallets.usdc}&tag=latest&apikey=${ETHERSCAN_API_KEY}`
-    );
-    results.usdc = parseFloat(usdcRes.data.result) / 1e6;
+    const USDC_CONTRACT = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+    const usdcToken = new ethers.Contract(USDC_CONTRACT, ERC20_ABI, provider);
+    const balance = await usdcToken.balanceOf(wallets.usdc);
+    const decimals = await usdcToken.decimals();
+    results.usdc = Number(ethers.formatUnits(balance, decimals));
   } catch (err) {
     console.error('USDC fetch error:', err.message);
     results.usdc = null;
   }
 
-  // === PAXG via Etherscan ===
+  // PAXG via Infura RPC
   try {
-    const paxgRes = await axios.get(
-      `https://api.etherscan.io/api?module=account&action=tokenbalance&contractaddress=0x45804880De22913dAFE09f4980848ECE6EcbAf78&address=${wallets.paxg}&tag=latest&apikey=${ETHERSCAN_API_KEY}`
-    );
-    results.paxg = parseFloat(paxgRes.data.result) / 1e18;
+    const PAXG_CONTRACT = '0x45804880De22913dAFE09f4980848ECE6EcbAf78';
+    const paxgToken = new ethers.Contract(PAXG_CONTRACT, ERC20_ABI, provider);
+    const balance = await paxgToken.balanceOf(wallets.paxg);
+    const decimals = await paxgToken.decimals();
+    results.paxg = Number(ethers.formatUnits(balance, decimals));
   } catch (err) {
     console.error('PAXG fetch error:', err.message);
     results.paxg = null;
@@ -137,11 +148,7 @@ app.get('/api/balances', async (req, res) => {
 
   try {
     const kaspaRes = await axios.get(`https://api.kaspa.org/addresses/${wallets.kaspa}/balance`);
-    if (kaspaRes.data && kaspaRes.data.balance) {
-      results.kaspa = kaspaRes.data.balance / 1e8;
-    } else {
-      results.kaspa = null;
-    }
+    results.kaspa = kaspaRes.data.balance ? kaspaRes.data.balance / 1e8 : null;
   } catch (err) {
     console.error('KASPA fetch error:', err.message);
     results.kaspa = null;
