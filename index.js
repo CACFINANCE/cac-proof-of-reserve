@@ -2,7 +2,6 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
-const { ethers } = require('ethers');
 
 const { calculateUsdPerCac } = require('./updatePrice');
 
@@ -23,16 +22,7 @@ const wallets = {
 };
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-const RPC_URL_PRIMARY = process.env.RPC_URL_PRIMARY;
-
-// ERC-20 ABI fragment for balanceOf
-const ERC20_ABI = [
-  'function balanceOf(address) view returns (uint256)',
-  'function decimals() view returns (uint8)'
-];
-
-// Initialize ethers provider
-const provider = new ethers.JsonRpcProvider(RPC_URL_PRIMARY);
+const MORALIS_API_KEY = process.env.MORALIS_API_KEY;
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -46,9 +36,7 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
-    const ethRes = await axios.get(
-      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${process.env.ETHERSCAN_API_KEY}`
-    );
+    const ethRes = await axios.get(`https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest`);
     results.eth = parseFloat(ethRes.data.result) / 1e18;
   } catch (err) {
     console.error('ETH fetch error:', err.message);
@@ -74,25 +62,29 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
-  // USDC via Infura RPC
+  // === USDC via Moralis ===
+  const USDC_CONTRACT = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+
   try {
-    const USDC_CONTRACT = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
-    const usdcToken = new ethers.Contract(USDC_CONTRACT, ERC20_ABI, provider);
-    const balance = await usdcToken.balanceOf(wallets.usdc);
-    const decimals = await usdcToken.decimals();
-    results.usdc = Number(ethers.formatUnits(balance, decimals));
+    const usdcRes = await axios.get(
+      `https://deep-index.moralis.io/api/v2.2/erc20/${USDC_CONTRACT}/balance?chain=eth&address=${wallets.usdc}`,
+      { headers: { 'X-API-Key': MORALIS_API_KEY } }
+    );
+    results.usdc = parseFloat(usdcRes.data.balance) / 1e6;
   } catch (err) {
     console.error('USDC fetch error:', err.message);
     results.usdc = null;
   }
 
-  // PAXG via Infura RPC
+  // === PAXG via Moralis ===
+  const PAXG_CONTRACT = '0x45804880De22913dAFE09f4980848ECE6EcbAf78';
+
   try {
-    const PAXG_CONTRACT = '0x45804880De22913dAFE09f4980848ECE6EcbAf78';
-    const paxgToken = new ethers.Contract(PAXG_CONTRACT, ERC20_ABI, provider);
-    const balance = await paxgToken.balanceOf(wallets.paxg);
-    const decimals = await paxgToken.decimals();
-    results.paxg = Number(ethers.formatUnits(balance, decimals));
+    const paxgRes = await axios.get(
+      `https://deep-index.moralis.io/api/v2.2/erc20/${PAXG_CONTRACT}/balance?chain=eth&address=${wallets.paxg}`,
+      { headers: { 'X-API-Key': MORALIS_API_KEY } }
+    );
+    results.paxg = parseFloat(paxgRes.data.balance) / 1e18;
   } catch (err) {
     console.error('PAXG fetch error:', err.message);
     results.paxg = null;
@@ -148,7 +140,11 @@ app.get('/api/balances', async (req, res) => {
 
   try {
     const kaspaRes = await axios.get(`https://api.kaspa.org/addresses/${wallets.kaspa}/balance`);
-    results.kaspa = kaspaRes.data.balance ? kaspaRes.data.balance / 1e8 : null;
+    if (kaspaRes.data && kaspaRes.data.balance) {
+      results.kaspa = kaspaRes.data.balance / 1e8;
+    } else {
+      results.kaspa = null;
+    }
   } catch (err) {
     console.error('KASPA fetch error:', err.message);
     results.kaspa = null;
