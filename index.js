@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
+const { ethers } = require('ethers');
 
 const { calculateUsdPerCac } = require('./updatePrice');
 
@@ -22,7 +23,24 @@ const wallets = {
 };
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-const MORALIS_API_KEY = process.env.MORALIS_API_KEY;
+const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
+const RPC_URL = process.env.RPC_URL;
+
+const provider = new ethers.JsonRpcProvider(RPC_URL);
+
+const erc20Abi = [
+  'function balanceOf(address owner) view returns (uint256)',
+  'function decimals() view returns (uint8)'
+];
+
+async function getERC20Balance(tokenAddress, holderAddress) {
+  const contract = new ethers.Contract(tokenAddress, erc20Abi, provider);
+  const [balance, decimals] = await Promise.all([
+    contract.balanceOf(holderAddress),
+    contract.decimals()
+  ]);
+  return parseFloat(ethers.formatUnits(balance, decimals));
+}
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -37,7 +55,7 @@ app.get('/api/balances', async (req, res) => {
 
   try {
     const ethRes = await axios.get(
-      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${process.env.ETHERSCAN_API_KEY}`
+      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${ETHERSCAN_API_KEY}`
     );
     results.eth = parseFloat(ethRes.data.result) / 1e18;
   } catch (err) {
@@ -64,29 +82,21 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
-  // === USDC & PAXG via Moralis (corrected)
+  // ✅ Rewritten: Fetch USDC balance via ethers.js (on-chain)
+  const USDC_CONTRACT = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
   try {
-    const tokenRes = await axios.get(
-      `https://deep-index.moralis.io/api/v2.2/${wallets.usdc}/erc20?chain=eth`,
-      {
-        headers: { 'X-API-Key': MORALIS_API_KEY }
-      }
-    );
-
-    results.usdc = null;
-    results.paxg = null;
-
-    for (const token of tokenRes.data) {
-      if (token.token_address.toLowerCase() === '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48') {
-        results.usdc = parseFloat(token.balance) / 1e6;
-      }
-      if (token.token_address.toLowerCase() === '0x45804880de22913dafe09f4980848ece6ecbaf78') {
-        results.paxg = parseFloat(token.balance) / 1e18;
-      }
-    }
+    results.usdc = await getERC20Balance(USDC_CONTRACT, wallets.usdc);
   } catch (err) {
-    console.error('USDC/PAXG fetch error:', err.message);
+    console.error('USDC fetch error:', err.message);
     results.usdc = null;
+  }
+
+  // ✅ Rewritten: Fetch PAXG balance via ethers.js (on-chain)
+  const PAXG_CONTRACT = '0x45804880De22913dAFE09f4980848ECE6EcbAf78';
+  try {
+    results.paxg = await getERC20Balance(PAXG_CONTRACT, wallets.paxg);
+  } catch (err) {
+    console.error('PAXG fetch error:', err.message);
     results.paxg = null;
   }
 
