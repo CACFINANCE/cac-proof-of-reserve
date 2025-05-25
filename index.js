@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
+const { ethers } = require('ethers');
 
 const { calculateUsdPerCac } = require('./updatePrice');
 
@@ -22,9 +23,12 @@ const wallets = {
 };
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
 const INFURA_KEY = process.env.INFURA_KEY;
+
 const INFURA_URL = `https://mainnet.infura.io/v3/${INFURA_KEY}`;
+const provider = new ethers.JsonRpcProvider(INFURA_URL);
+
+const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -39,7 +43,7 @@ app.get('/api/balances', async (req, res) => {
 
   try {
     const ethRes = await axios.get(
-      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${ETHERSCAN_API_KEY}`
+      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${process.env.ETHERSCAN_API_KEY}`
     );
     results.eth = parseFloat(ethRes.data.result) / 1e18;
   } catch (err) {
@@ -66,41 +70,29 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
-  // === USDC via Infura RPC ===
+  // === USDC via Infura ===
   try {
-    const usdcRes = await axios.post(INFURA_URL, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'eth_call',
-      params: [
-        {
-          to: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC contract
-          data: `0x70a08231000000000000000000000000${wallets.usdc.slice(2)}`
-        },
-        'latest'
-      ]
-    });
-    results.usdc = parseInt(usdcRes.data.result, 16) / 1e6;
+    const usdcContract = new ethers.Contract(
+      '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+      ERC20_ABI,
+      provider
+    );
+    const usdcBalance = await usdcContract.balanceOf(wallets.usdc);
+    results.usdc = Number(ethers.formatUnits(usdcBalance, 6));
   } catch (err) {
     console.error('USDC fetch error:', err.message);
     results.usdc = null;
   }
 
-  // === PAXG via Infura RPC ===
+  // === PAXG via Infura ===
   try {
-    const paxgRes = await axios.post(INFURA_URL, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'eth_call',
-      params: [
-        {
-          to: '0x45804880De22913dAFE09f4980848ECE6EcbAf78', // PAXG contract
-          data: `0x70a08231000000000000000000000000${wallets.paxg.slice(2)}`
-        },
-        'latest'
-      ]
-    });
-    results.paxg = parseInt(paxgRes.data.result, 16) / 1e18;
+    const paxgContract = new ethers.Contract(
+      '0x45804880De22913dAFE09f4980848ECE6EcbAf78',
+      ERC20_ABI,
+      provider
+    );
+    const paxgBalance = await paxgContract.balanceOf(wallets.paxg);
+    results.paxg = Number(ethers.formatUnits(paxgBalance, 18));
   } catch (err) {
     console.error('PAXG fetch error:', err.message);
     results.paxg = null;
@@ -173,7 +165,7 @@ app.get('/api/balances', async (req, res) => {
 app.get('/api/update-price', async (req, res) => {
   try {
     const price = await calculateUsdPerCac();
-    res.json({ price: price.toFixed(6) }); // valid JSON response
+    res.json({ price: price.toFixed(6) });
   } catch (err) {
     console.error('Update price error:', err.message);
     res.status(500).json({ error: 'Failed to calculate CAC price.' });
