@@ -36,7 +36,9 @@ app.get('/api/balances', async (req, res) => {
   }
 
   try {
-    const ethRes = await axios.get(`https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest`);
+    const ethRes = await axios.get(
+      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${process.env.ETHERSCAN_API_KEY}`
+    );
     results.eth = parseFloat(ethRes.data.result) / 1e18;
   } catch (err) {
     console.error('ETH fetch error:', err.message);
@@ -62,31 +64,29 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
-  // === USDC via Moralis ===
-  const USDC_CONTRACT = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
-
+  // === USDC & PAXG via Moralis (corrected)
   try {
-    const usdcRes = await axios.get(
-      `https://deep-index.moralis.io/api/v2.2/erc20/${USDC_CONTRACT}/balance?chain=eth&address=${wallets.usdc}`,
-      { headers: { 'X-API-Key': MORALIS_API_KEY } }
+    const tokenRes = await axios.get(
+      `https://deep-index.moralis.io/api/v2.2/${wallets.usdc}/erc20?chain=eth`,
+      {
+        headers: { 'X-API-Key': MORALIS_API_KEY }
+      }
     );
-    results.usdc = parseFloat(usdcRes.data.balance) / 1e6;
-  } catch (err) {
-    console.error('USDC fetch error:', err.message);
+
     results.usdc = null;
-  }
+    results.paxg = null;
 
-  // === PAXG via Moralis ===
-  const PAXG_CONTRACT = '0x45804880De22913dAFE09f4980848ECE6EcbAf78';
-
-  try {
-    const paxgRes = await axios.get(
-      `https://deep-index.moralis.io/api/v2.2/erc20/${PAXG_CONTRACT}/balance?chain=eth&address=${wallets.paxg}`,
-      { headers: { 'X-API-Key': MORALIS_API_KEY } }
-    );
-    results.paxg = parseFloat(paxgRes.data.balance) / 1e18;
+    for (const token of tokenRes.data) {
+      if (token.token_address.toLowerCase() === '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48') {
+        results.usdc = parseFloat(token.balance) / 1e6;
+      }
+      if (token.token_address.toLowerCase() === '0x45804880de22913dafe09f4980848ece6ecbaf78') {
+        results.paxg = parseFloat(token.balance) / 1e18;
+      }
+    }
   } catch (err) {
-    console.error('PAXG fetch error:', err.message);
+    console.error('USDC/PAXG fetch error:', err.message);
+    results.usdc = null;
     results.paxg = null;
   }
 
