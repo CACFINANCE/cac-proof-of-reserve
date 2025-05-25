@@ -23,8 +23,7 @@ const wallets = {
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
-const INFURA_KEY = process.env.INFURA_KEY;
-const INFURA_URL = `https://mainnet.infura.io/v3/${INFURA_KEY}`;
+
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -66,41 +65,29 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
-  // === USDC via Infura RPC ===
+  // Fetch USDC token balance via Etherscan tokenbalance API
+  // USDC contract address on Ethereum mainnet:
+  const USDC_CONTRACT = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+
   try {
-    const usdcRes = await axios.post(INFURA_URL, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'eth_call',
-      params: [
-        {
-          to: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC contract
-          data: `0x70a08231000000000000000000000000${wallets.usdc.slice(2)}`
-        },
-        'latest'
-      ]
-    });
-    results.usdc = parseInt(usdcRes.data.result, 16) / 1e6;
+    const usdcRes = await axios.get(
+      `https://api.etherscan.io/api?module=account&action=tokenbalance&contractaddress=${USDC_CONTRACT}&address=${wallets.usdc}&tag=latest&apikey=${ETHERSCAN_API_KEY}`
+    );
+    results.usdc = usdcRes.data.status === "1" ? parseFloat(usdcRes.data.result) / 1e6 : null;
   } catch (err) {
     console.error('USDC fetch error:', err.message);
     results.usdc = null;
   }
 
-  // === PAXG via Infura RPC ===
+  // Fetch PAXG token balance via Etherscan tokenbalance API
+  // PAXG contract address on Ethereum mainnet:
+  const PAXG_CONTRACT = '0x45804880De22913dAFE09f4980848ECE6EcbAf78';
+
   try {
-    const paxgRes = await axios.post(INFURA_URL, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'eth_call',
-      params: [
-        {
-          to: '0x45804880De22913dAFE09f4980848ECE6EcbAf78', // PAXG contract
-          data: `0x70a08231000000000000000000000000${wallets.paxg.slice(2)}`
-        },
-        'latest'
-      ]
-    });
-    results.paxg = parseInt(paxgRes.data.result, 16) / 1e18;
+    const paxgRes = await axios.get(
+      `https://api.etherscan.io/api?module=account&action=tokenbalance&contractaddress=${PAXG_CONTRACT}&address=${wallets.paxg}&tag=latest&apikey=${ETHERSCAN_API_KEY}`
+    );
+    results.paxg = paxgRes.data.status === "1" ? parseFloat(paxgRes.data.result) / 1e18 : null;
   } catch (err) {
     console.error('PAXG fetch error:', err.message);
     results.paxg = null;
