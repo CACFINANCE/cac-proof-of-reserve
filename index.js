@@ -2,8 +2,8 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
-const { ethers } = require('ethers');
 
+const { ethers } = require('ethers');
 const { calculateUsdPerCac } = require('./updatePrice');
 
 const app = express();
@@ -22,25 +22,15 @@ const wallets = {
   kaspa: 'kaspa:qzmre59lsdqpd66tvz5wceaw74ez8xj7x2ldvdscxngv0ld4g237v3d4dkmnd'
 };
 
-const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
 const RPC_URL = process.env.RPC_URL;
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 
-const erc20Abi = [
-  'function balanceOf(address owner) view returns (uint256)',
-  'function decimals() view returns (uint8)'
+const ERC20_ABI = [
+  "function balanceOf(address owner) view returns (uint256)",
+  "function decimals() view returns (uint8)"
 ];
-
-async function getERC20Balance(tokenAddress, holderAddress) {
-  const contract = new ethers.Contract(tokenAddress, erc20Abi, provider);
-  const [balance, decimals] = await Promise.all([
-    contract.balanceOf(holderAddress),
-    contract.decimals()
-  ]);
-  return parseFloat(ethers.formatUnits(balance, decimals));
-}
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -48,26 +38,23 @@ app.get('/api/balances', async (req, res) => {
   try {
     const btcRes = await axios.get(`https://blockstream.info/api/address/${wallets.btc}`);
     results.btc = btcRes.data.chain_stats.funded_txo_sum / 1e8 - btcRes.data.chain_stats.spent_txo_sum / 1e8;
-  } catch (err) {
-    console.error('BTC fetch error:', err.message);
+  } catch {
     results.btc = null;
   }
 
   try {
     const ethRes = await axios.get(
-      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${ETHERSCAN_API_KEY}`
+      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${process.env.ETHERSCAN_API_KEY}`
     );
     results.eth = parseFloat(ethRes.data.result) / 1e18;
-  } catch (err) {
-    console.error('ETH fetch error:', err.message);
+  } catch {
     results.eth = null;
   }
 
   try {
     const trxRes = await axios.get(`https://apilist.tronscanapi.com/api/account?address=${wallets.trx}`);
     results.trx = trxRes.data.balance / 1e6;
-  } catch (err) {
-    console.error('TRX fetch error:', err.message);
+  } catch {
     results.trx = null;
   }
 
@@ -77,26 +64,27 @@ app.get('/api/balances', async (req, res) => {
       params: [{ account: wallets.xrp, ledger_index: 'validated', strict: true }]
     });
     results.xrp = xrpRes.data.result.account_data.Balance / 1e6;
-  } catch (err) {
-    console.error('XRP fetch error:', err.message);
+  } catch {
     results.xrp = null;
   }
 
-  // ✅ Rewritten: Fetch USDC balance via ethers.js (on-chain)
-  const USDC_CONTRACT = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+  // ✅ USDC fix using ethers.js
   try {
-    results.usdc = await getERC20Balance(USDC_CONTRACT, wallets.usdc);
-  } catch (err) {
-    console.error('USDC fetch error:', err.message);
+    const usdc = new ethers.Contract("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", ERC20_ABI, provider);
+    const balance = await usdc.balanceOf(wallets.usdc);
+    const decimals = await usdc.decimals();
+    results.usdc = parseFloat(ethers.formatUnits(balance, decimals));
+  } catch {
     results.usdc = null;
   }
 
-  // ✅ Rewritten: Fetch PAXG balance via ethers.js (on-chain)
-  const PAXG_CONTRACT = '0x45804880De22913dAFE09f4980848ECE6EcbAf78';
+  // ✅ PAXG fix using ethers.js
   try {
-    results.paxg = await getERC20Balance(PAXG_CONTRACT, wallets.paxg);
-  } catch (err) {
-    console.error('PAXG fetch error:', err.message);
+    const paxg = new ethers.Contract("0x45804880De22913dAFE09f4980848ECE6EcbAf78", ERC20_ABI, provider);
+    const balance = await paxg.balanceOf(wallets.paxg);
+    const decimals = await paxg.decimals();
+    results.paxg = parseFloat(ethers.formatUnits(balance, decimals));
+  } catch {
     results.paxg = null;
   }
 
@@ -111,8 +99,7 @@ app.get('/api/balances', async (req, res) => {
       }
     );
     results.sol = solanaRes.data.result.value / 1e9;
-  } catch (err) {
-    console.error('SOL fetch error:', err.message);
+  } catch {
     results.sol = null;
   }
 
@@ -143,33 +130,25 @@ app.get('/api/balances', async (req, res) => {
     }
 
     results.rndr = totalRender;
-  } catch (err) {
-    console.error('RNDR fetch error:', err.message);
+  } catch {
     results.rndr = null;
   }
 
   try {
     const kaspaRes = await axios.get(`https://api.kaspa.org/addresses/${wallets.kaspa}/balance`);
-    if (kaspaRes.data && kaspaRes.data.balance) {
-      results.kaspa = kaspaRes.data.balance / 1e8;
-    } else {
-      results.kaspa = null;
-    }
-  } catch (err) {
-    console.error('KASPA fetch error:', err.message);
+    results.kaspa = kaspaRes.data.balance / 1e8;
+  } catch {
     results.kaspa = null;
   }
 
   res.json(results);
 });
 
-// === USD per CAC Endpoint ===
 app.get('/api/update-price', async (req, res) => {
   try {
     const price = await calculateUsdPerCac();
     res.json({ price: price.toFixed(6) });
-  } catch (err) {
-    console.error('Update price error:', err.message);
+  } catch {
     res.status(500).json({ error: 'Failed to calculate CAC price.' });
   }
 });
