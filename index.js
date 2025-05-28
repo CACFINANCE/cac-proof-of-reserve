@@ -24,30 +24,9 @@ const wallets = {
 
 const RPC_URL = process.env.RPC_URL;
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-const ALCHEMY_API_URL = process.env.ALCHEMY_API_URL;
+const ALCHEMY_API_KEY = process.env.ALCHEMY_API_KEY;
 
 const provider = new ethers.JsonRpcProvider(RPC_URL);
-
-async function fetchAlchemyBalance(walletAddress, tokenAddress) {
-  try {
-    const res = await axios.post(ALCHEMY_API_URL, {
-      jsonrpc: "2.0",
-      method: "alchemy_getTokenBalances",
-      params: [
-        walletAddress,
-        [tokenAddress]
-      ],
-      id: 1
-    });
-
-    const hexBalance = res.data.result.tokenBalances[0].tokenBalance;
-    const balance = hexBalance ? parseInt(hexBalance, 16) : 0;
-    return balance;
-  } catch (err) {
-    console.error("Alchemy fetch error:", err.message);
-    return null;
-  }
-}
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -85,19 +64,33 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
-  // ✅ USDC balance using Alchemy
+  // ✅ USDC via Alchemy Enhanced API
   try {
-    const rawBalance = await fetchAlchemyBalance(wallets.usdc, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
-    results.usdc = rawBalance !== null ? rawBalance / 1e6 : null;
-  } catch {
+    const alchemyRes = await axios.post(`https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "alchemy_getTokenBalances",
+      params: [wallets.usdc, ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"]] // USDC contract
+    });
+    const raw = alchemyRes.data.result.tokenBalances[0].tokenBalance;
+    results.usdc = raw ? parseFloat(ethers.formatUnits(raw, 6)) : 0;
+  } catch (err) {
+    console.error("USDC fetch error:", err.message);
     results.usdc = null;
   }
 
-  // ✅ PAXG balance using Alchemy
+  // ✅ PAXG via Alchemy Enhanced API
   try {
-    const rawBalance = await fetchAlchemyBalance(wallets.paxg, "0x45804880De22913dAFE09f4980848ECE6EcbAf78");
-    results.paxg = rawBalance !== null ? rawBalance / 1e18 : null;
-  } catch {
+    const alchemyRes = await axios.post(`https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "alchemy_getTokenBalances",
+      params: [wallets.paxg, ["0x45804880De22913dAFE09f4980848ECE6EcbAf78"]] // PAXG contract
+    });
+    const raw = alchemyRes.data.result.tokenBalances[0].tokenBalance;
+    results.paxg = raw ? parseFloat(ethers.formatUnits(raw, 18)) : 0;
+  } catch (err) {
+    console.error("PAXG fetch error:", err.message);
     results.paxg = null;
   }
 
