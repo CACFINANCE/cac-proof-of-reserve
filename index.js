@@ -22,26 +22,15 @@ const wallets = {
   kaspa: 'kaspa:qzmre59lsdqpd66tvz5wceaw74ez8xj7x2ldvdscxngv0ld4g237v3d4dkmnd'
 };
 
-const QUICKNODE_HTTP_URL = process.env.QUICKNODE_HTTP_URL;
-const provider = new ethers.JsonRpcProvider(QUICKNODE_HTTP_URL);
+const RPC_URL = process.env.RPC_URL;
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+
+const provider = new ethers.JsonRpcProvider(RPC_URL);
 
 const ERC20_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
   "function decimals() view returns (uint8)"
 ];
-
-// Helper to fetch ERC20 balance via ethers.js provider
-async function getERC20Balance(tokenAddress, walletAddress) {
-  try {
-    const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
-    const balance = await contract.balanceOf(walletAddress);
-    const decimals = await contract.decimals();
-    return parseFloat(ethers.formatUnits(balance, decimals));
-  } catch (error) {
-    console.error(`Error fetching balance for token ${tokenAddress} and wallet ${walletAddress}:`, error.message);
-    return null;
-  }
-}
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -79,21 +68,35 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
-  // USDC balance using QuickNode provider and ethers.js
-  results.usdc = await getERC20Balance(
-    "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // USDC contract on Ethereum mainnet
-    wallets.usdc
-  );
+  // 🧪 Debugged USDC balance fetch with logs
+  try {
+    console.log('Fetching USDC balance...');
+    const usdc = new ethers.Contract("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", ERC20_ABI, provider);
+    const balance = await usdc.balanceOf(wallets.usdc);
+    const decimals = await usdc.decimals();
+    results.usdc = parseFloat(ethers.formatUnits(balance, decimals));
+    console.log(`USDC balance: ${results.usdc}`);
+  } catch (err) {
+    console.error('USDC fetch error:', err.message || err);
+    results.usdc = null;
+  }
 
-  // PAXG balance using QuickNode provider and ethers.js
-  results.paxg = await getERC20Balance(
-    "0x45804880De22913dAFE09f4980848ECE6EcbAf78", // PAXG contract on Ethereum mainnet
-    wallets.paxg
-  );
+  // 🧪 Debugged PAXG balance fetch with logs
+  try {
+    console.log('Fetching PAXG balance...');
+    const paxg = new ethers.Contract("0x45804880De22913dAFE09f4980848ECE6EcbAf78", ERC20_ABI, provider);
+    const balance = await paxg.balanceOf(wallets.paxg);
+    const decimals = await paxg.decimals();
+    results.paxg = parseFloat(ethers.formatUnits(balance, decimals));
+    console.log(`PAXG balance: ${results.paxg}`);
+  } catch (err) {
+    console.error('PAXG fetch error:', err.message || err);
+    results.paxg = null;
+  }
 
   try {
     const solanaRes = await axios.post(
-      `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`,
+      `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
       {
         jsonrpc: '2.0',
         id: 1,
@@ -108,7 +111,7 @@ app.get('/api/balances', async (req, res) => {
 
   try {
     const renderRes = await axios.post(
-      `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`,
+      `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
       {
         jsonrpc: '2.0',
         id: 1,
