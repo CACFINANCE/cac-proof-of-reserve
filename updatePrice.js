@@ -10,6 +10,18 @@ const CAC_MAINNET_CONTRACT = "0xaE811d6CE4ca45Dfd4874d95CCB949312F909a21";
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
 const BACKEND_URL = "https://cac-backend-2i3y.onrender.com/api/balances";
 
+const COINGECKO_IDS = {
+  btc: "bitcoin",
+  eth: "ethereum",
+  trx: "tron",
+  xrp: "ripple",
+  usdc: "usd-coin",
+  paxg: "pax-gold",
+  sol: "solana",
+  rndr: "render-token",
+  kaspa: "kaspa",
+};
+
 const CAC_RESERVE_SEPOLIA = "0xEd9218734bb090daf07226D5B56cf1266208f943";
 const CAC_RESERVE_ABI = [
   {
@@ -28,47 +40,6 @@ const CAC_RESERVE_ABI = [
   },
 ];
 
-const COINGECKO_IDS = {
-  btc: "bitcoin",
-  eth: "ethereum",
-  trx: "tron",
-  xrp: "ripple",
-  usdc: "usd-coin",
-  paxg: "pax-gold",
-  sol: "solana",
-  rndr: "render-token",
-  kaspa: "kaspa",
-};
-
-// === Caching mechanism ===
-let cachedPrice = null;
-let lastFetched = 0;
-const CACHE_DURATION_MS = 3 * 60 * 1000; // 3 minutes
-
-// === Retry wrapper with backoff ===
-async function retry(fn, maxAttempts = 3, delay = 1000) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const status = err.response?.status;
-      if (status === 403) {
-        console.error("⚠️ TRX fetch error: Request blocked (403)");
-      }
-      if (status === 429) {
-        console.warn(`⏳ Rate limited (429) - retrying in 10s...`);
-        await new Promise(res => setTimeout(res, 10000));
-      } else if (attempt < maxAttempts) {
-        await new Promise(res => setTimeout(res, delay * attempt));
-      } else {
-        throw err;
-      }
-    }
-  }
-}
-
-const AXIOS_CONFIG = { timeout: 15000 };
-
 // === Fetch CAC total supply from Etherscan ===
 async function fetchTotalSupplyFromEtherscan() {
   const res = await axios.get("https://api.etherscan.io/api", {
@@ -78,7 +49,6 @@ async function fetchTotalSupplyFromEtherscan() {
       contractaddress: CAC_MAINNET_CONTRACT,
       apikey: ETHERSCAN_API_KEY,
     },
-    ...AXIOS_CONFIG,
   });
 
   if (res.data.status !== "1" || !res.data.result) {
@@ -90,32 +60,25 @@ async function fetchTotalSupplyFromEtherscan() {
 
 // === Calculate USD per CAC token ===
 async function calculateUsdPerCac() {
-  const now = Date.now();
-  if (cachedPrice && now - lastFetched < CACHE_DURATION_MS) {
-    return { price: cachedPrice };
-  }
-
-  console.log("🔄 Calculating new CAC price...");
-
+  // Connect to provider (for optional on-chain update)
   const provider = new ethers.JsonRpcProvider(RPC_URL);
   const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+  const contract = new ethers.Contract(CAC_RESERVE_SEPOLIA, CAC_RESERVE_ABI, signer);
 
-  console.log("🌐 Fetching token balances from backend...");
-  const balancesRes = await retry(() => axios.get(BACKEND_URL, AXIOS_CONFIG));
+  // Fetch token balances from backend
+  const balancesRes = await axios.get(BACKEND_URL);
   const balances = balancesRes.data;
 
+  // Build CoinGecko request
   const ids = Object.keys(balances)
     .map((token) => COINGECKO_IDS[token.toLowerCase()])
     .filter(Boolean)
     .join(",");
 
-  console.log("💱 Fetching prices from CoinGecko...");
-  const priceRes = await retry(() =>
-    axios.get("https://api.coingecko.com/api/v3/simple/price", {
-      params: { ids, vs_currencies: "usd" },
-      ...AXIOS_CONFIG,
-    })
-  );
+  const priceRes = await axios.get("https://api.coingecko.com/api/v3/simple/price", {
+    params: { ids, vs_currencies: "usd" },
+  });
+
   const prices = priceRes.data;
 
   let totalReserveUSD = 0;
@@ -126,7 +89,6 @@ async function calculateUsdPerCac() {
     const price = prices[id]?.usd;
 
     if (!price) {
-      console.error(`⚠️ Missing price for ${token.toUpperCase()} (${id})`);
       missingPrices.push(token.toUpperCase());
       continue;
     }
@@ -142,7 +104,7 @@ async function calculateUsdPerCac() {
     throw new Error("Total reserve is zero.");
   }
 
-  console.log("📦 Fetching CAC total supply...");
+  // Get CAC total supply
   const totalSupplyRaw = await fetchTotalSupplyFromEtherscan();
   const totalSupply = parseFloat(ethers.formatUnits(totalSupplyRaw, 8));
 
@@ -150,23 +112,18 @@ async function calculateUsdPerCac() {
     throw new Error("Total CAC supply is zero.");
   }
 
-  const finalPrice = totalReserveUSD / totalSupply;
-
-  cachedPrice = finalPrice;
-  lastFetched = Date.now();
-
-  return { price: finalPrice };
+  // Final USD price per CAC
+  return totalReserveUSD / totalSupply;
 }
 
 // === CLI run support ===
 if (require.main === module) {
   calculateUsdPerCac()
-    .then(({ price }) => {
-      console.log(JSON.stringify({ price: price.toFixed(6) }));
+    .then((price) => {
+      console.log(`📈 USD per CAC: $${price.toFixed(4)}`);
     })
     .catch((err) => {
-      console.error("Update price error:", err.message || err);
-      console.log(JSON.stringify({ error: "Failed to calculate CAC price." }));
+      console.error("❌ Error:", err.message || err);
     });
 }
 

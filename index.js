@@ -22,15 +22,7 @@ const wallets = {
   kaspa: 'kaspa:qzmre59lsdqpd66tvz5wceaw74ez8xj7x2ldvdscxngv0ld4g237v3d4dkmnd'
 };
 
-const RPC_URL = process.env.RPC_URL;
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-
-const provider = new ethers.JsonRpcProvider(RPC_URL);
-
-const ERC20_ABI = [
-  "function balanceOf(address owner) view returns (uint256)",
-  "function decimals() view returns (uint8)"
-];
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -68,22 +60,24 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
-  // ✅ USDC fix using ethers.js
+  // ✅ USDC using Ethplorer (no API key required for basic)
   try {
-    const usdc = new ethers.Contract("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", ERC20_ABI, provider);
-    const balance = await usdc.balanceOf(wallets.usdc);
-    const decimals = await usdc.decimals();
-    results.usdc = parseFloat(ethers.formatUnits(balance, decimals));
+    const usdcRes = await axios.get(
+      `https://api.ethplorer.io/getAddressInfo/${wallets.usdc}?apiKey=freekey`
+    );
+    const usdcToken = usdcRes.data.tokens.find(t => t.tokenInfo.symbol === 'USDC');
+    results.usdc = usdcToken ? parseFloat(usdcToken.balance) / (10 ** usdcToken.tokenInfo.decimals) : null;
   } catch {
     results.usdc = null;
   }
 
-  // ✅ PAXG fix using ethers.js
+  // ✅ PAXG using Ethplorer
   try {
-    const paxg = new ethers.Contract("0x45804880De22913dAFE09f4980848ECE6EcbAf78", ERC20_ABI, provider);
-    const balance = await paxg.balanceOf(wallets.paxg);
-    const decimals = await paxg.decimals();
-    results.paxg = parseFloat(ethers.formatUnits(balance, decimals));
+    const paxgRes = await axios.get(
+      `https://api.ethplorer.io/getAddressInfo/${wallets.paxg}?apiKey=freekey`
+    );
+    const paxgToken = paxgRes.data.tokens.find(t => t.tokenInfo.symbol === 'PAXG');
+    results.paxg = paxgToken ? parseFloat(paxgToken.balance) / (10 ** paxgToken.tokenInfo.decimals) : null;
   } catch {
     results.paxg = null;
   }
