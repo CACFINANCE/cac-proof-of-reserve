@@ -22,7 +22,32 @@ const wallets = {
   kaspa: 'kaspa:qzmre59lsdqpd66tvz5wceaw74ez8xj7x2ldvdscxngv0ld4g237v3d4dkmnd'
 };
 
+const RPC_URL = process.env.RPC_URL;
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+const ALCHEMY_API_URL = process.env.ALCHEMY_API_URL;
+
+const provider = new ethers.JsonRpcProvider(RPC_URL);
+
+async function fetchAlchemyBalance(walletAddress, tokenAddress) {
+  try {
+    const res = await axios.post(ALCHEMY_API_URL, {
+      jsonrpc: "2.0",
+      method: "alchemy_getTokenBalances",
+      params: [
+        walletAddress,
+        [tokenAddress]
+      ],
+      id: 1
+    });
+
+    const hexBalance = res.data.result.tokenBalances[0].tokenBalance;
+    const balance = hexBalance ? parseInt(hexBalance, 16) : 0;
+    return balance;
+  } catch (err) {
+    console.error("Alchemy fetch error:", err.message);
+    return null;
+  }
+}
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -60,24 +85,18 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
-  // ✅ USDC using Ethplorer (no API key required for basic)
+  // ✅ USDC balance using Alchemy
   try {
-    const usdcRes = await axios.get(
-      `https://api.ethplorer.io/getAddressInfo/${wallets.usdc}?apiKey=freekey`
-    );
-    const usdcToken = usdcRes.data.tokens.find(t => t.tokenInfo.symbol === 'USDC');
-    results.usdc = usdcToken ? parseFloat(usdcToken.balance) / (10 ** usdcToken.tokenInfo.decimals) : null;
+    const rawBalance = await fetchAlchemyBalance(wallets.usdc, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+    results.usdc = rawBalance !== null ? rawBalance / 1e6 : null;
   } catch {
     results.usdc = null;
   }
 
-  // ✅ PAXG using Ethplorer
+  // ✅ PAXG balance using Alchemy
   try {
-    const paxgRes = await axios.get(
-      `https://api.ethplorer.io/getAddressInfo/${wallets.paxg}?apiKey=freekey`
-    );
-    const paxgToken = paxgRes.data.tokens.find(t => t.tokenInfo.symbol === 'PAXG');
-    results.paxg = paxgToken ? parseFloat(paxgToken.balance) / (10 ** paxgToken.tokenInfo.decimals) : null;
+    const rawBalance = await fetchAlchemyBalance(wallets.paxg, "0x45804880De22913dAFE09f4980848ECE6EcbAf78");
+    results.paxg = rawBalance !== null ? rawBalance / 1e18 : null;
   } catch {
     results.paxg = null;
   }
