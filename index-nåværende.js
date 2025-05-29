@@ -1,7 +1,6 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const fs = require('fs');
 require('dotenv').config();
 
 const { ethers } = require('ethers');
@@ -27,20 +26,15 @@ const RPC_URL = process.env.RPC_URL;
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 
 const provider = new ethers.JsonRpcProvider(RPC_URL);
+
 const ERC20_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
   "function decimals() view returns (uint8)"
 ];
 
-// Load initial cached price from file if it exists
+// === Caching for CAC Price ===
 let cachedPrice = null;
-try {
-  const data = fs.readFileSync('cac-price.json', 'utf-8');
-  const parsed = JSON.parse(data);
-  if (parsed?.price) cachedPrice = parsed.price;
-} catch (_) {
-  cachedPrice = null;
-}
+let lastUpdated = null;
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -78,6 +72,7 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
+  // ✅ USDC fix using ethers.js
   try {
     const usdc = new ethers.Contract("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", ERC20_ABI, provider);
     const balance = await usdc.balanceOf(wallets.usdc);
@@ -87,6 +82,7 @@ app.get('/api/balances', async (req, res) => {
     results.usdc = null;
   }
 
+  // ✅ PAXG fix using ethers.js
   try {
     const paxg = new ethers.Contract("0x45804880De22913dAFE09f4980848ECE6EcbAf78", ERC20_ABI, provider);
     const balance = await paxg.balanceOf(wallets.paxg);
@@ -155,18 +151,12 @@ app.get('/api/balances', async (req, res) => {
 app.get('/api/update-price', async (req, res) => {
   try {
     const price = await calculateUsdPerCac();
-    cachedPrice = price.toFixed(6);
-
-    // Save to cac-price.json
-    fs.writeFileSync('cac-price.json', JSON.stringify({
-      price: cachedPrice,
-      updatedAt: new Date().toISOString()
-    }));
-
-    res.json({ price: cachedPrice });
-  } catch (err) {
-    if (cachedPrice) {
-      res.json({ price: cachedPrice });
+    cachedPrice = price;
+    lastUpdated = new Date().toISOString();
+    res.json({ price: price.toFixed(6), lastUpdated });
+  } catch {
+    if (cachedPrice !== null) {
+      res.json({ price: cachedPrice.toFixed(6), cached: true, lastUpdated });
     } else {
       res.status(500).json({ error: 'Failed to calculate CAC price.' });
     }
