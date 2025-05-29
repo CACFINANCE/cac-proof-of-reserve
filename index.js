@@ -9,6 +9,7 @@ const { calculateUsdPerCac } = require('./updatePrice');
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(cors());
+app.use(express.json());
 
 const wallets = {
   btc: 'bc1qjfg46f6ru9h6wrdejkqa6um8496lpls59knsr7',
@@ -16,7 +17,6 @@ const wallets = {
   trx: 'TEK2WDVsMVxogtQGfVA6WwboidawRr69oy',
   xrp: 'rNZKMy6YiEDZ4pbJyqCSiaA4BWs6Mq8jyf',
   usdc: '0xf3d71E003dD5C38B2E797a3fed0Aa1ac92dB1266',
-  paxg: '0x5968364A1e1aF7fAEbf8c8AD9805709eF4beb936',
   sol: 'C566EL3iLEmEm8GETMzHDQwMPwWmxwiuwnskDyKZpT7u',
   render: 'C5oLMbkgPHig7YX6yZwiXnpxkPyiNYMYnjz7wLbsCnL1',
   kaspa: 'kaspa:qzmre59lsdqpd66tvz5wceaw74ez8xj7x2ldvdscxngv0ld4g237v3d4dkmnd'
@@ -31,6 +31,20 @@ const ERC20_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
   "function decimals() view returns (uint8)"
 ];
+
+// Proxy endpoint for USDC balance
+app.get('/api/usdc-balance', async (req, res) => {
+  try {
+    const usdc = new ethers.Contract("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", ERC20_ABI, provider);
+    const balance = await usdc.balanceOf(wallets.usdc);
+    const decimals = await usdc.decimals();
+    const formatted = parseFloat(ethers.formatUnits(balance, decimals));
+    res.json({ balance: formatted });
+  } catch (err) {
+    console.error('USDC balance proxy error:', err.message || err);
+    res.status(500).json({ error: 'Failed to fetch USDC balance' });
+  }
+});
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -68,30 +82,12 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
-  // 🧪 Debugged USDC balance fetch with logs
+  // Use proxy endpoint for USDC balance
   try {
-    console.log('Fetching USDC balance...');
-    const usdc = new ethers.Contract("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", ERC20_ABI, provider);
-    const balance = await usdc.balanceOf(wallets.usdc);
-    const decimals = await usdc.decimals();
-    results.usdc = parseFloat(ethers.formatUnits(balance, decimals));
-    console.log(`USDC balance: ${results.usdc}`);
-  } catch (err) {
-    console.error('USDC fetch error:', err.message || err);
+    const usdcProxyRes = await axios.get(`http://localhost:${PORT}/api/usdc-balance`);
+    results.usdc = usdcProxyRes.data.balance;
+  } catch {
     results.usdc = null;
-  }
-
-  // 🧪 Debugged PAXG balance fetch with logs
-  try {
-    console.log('Fetching PAXG balance...');
-    const paxg = new ethers.Contract("0x45804880De22913dAFE09f4980848ECE6EcbAf78", ERC20_ABI, provider);
-    const balance = await paxg.balanceOf(wallets.paxg);
-    const decimals = await paxg.decimals();
-    results.paxg = parseFloat(ethers.formatUnits(balance, decimals));
-    console.log(`PAXG balance: ${results.paxg}`);
-  } catch (err) {
-    console.error('PAXG fetch error:', err.message || err);
-    results.paxg = null;
   }
 
   try {
