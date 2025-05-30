@@ -116,13 +116,21 @@ async function main() {
     const balances = balancesRes.data;
     const tokens = Object.keys(balances);
 
-    const cmcPrices = await fetchCMCPrices(tokens);
-    const missingTokens = tokens.filter((t) => !cmcPrices[t.toLowerCase()]);
+    // Try CMC first
+    let cmcPrices = await fetchCMCPrices(tokens);
+    let tokensWithPrices = Object.keys(cmcPrices);
+    let missingTokens = tokens.filter((t) => !tokensWithPrices.includes(t.toLowerCase()));
 
-    const fallbackPrices = await fetchCoinGeckoPrices(missingTokens);
-    const combinedPrices = { ...cmcPrices, ...fallbackPrices };
+    // If all prices missing (CMC likely down), fallback to CoinGecko for all
+    if (tokensWithPrices.length === 0) {
+      console.warn("⚠️ All CMC prices failed, falling back to CoinGecko for all tokens");
+      cmcPrices = await fetchCoinGeckoPrices(tokens);
+    } else if (missingTokens.length > 0) {
+      const fallbackPrices = await fetchCoinGeckoPrices(missingTokens);
+      cmcPrices = { ...cmcPrices, ...fallbackPrices };
+    }
 
-    const stillMissing = tokens.filter((t) => !combinedPrices[t.toLowerCase()]);
+    const stillMissing = tokens.filter((t) => !cmcPrices[t.toLowerCase()]);
     if (stillMissing.length > 0) {
       throw new Error(
         `❌ Failed to fetch USD prices for: ${stillMissing.join(", ")}`
@@ -132,7 +140,7 @@ async function main() {
     // Total reserve USD
     let totalReserveUSD = 0;
     for (const [token, balance] of Object.entries(balances)) {
-      const { price, source } = combinedPrices[token.toLowerCase()];
+      const { price, source } = cmcPrices[token.toLowerCase()];
       const usdValue = balance * price;
       totalReserveUSD += usdValue;
       console.log(`💰 ${token.toUpperCase()} = $${price.toFixed(2)} (from ${source})`);
