@@ -1,7 +1,6 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const fs = require('fs');
 require('dotenv').config();
 
 const { ethers } = require('ethers');
@@ -25,22 +24,9 @@ const wallets = {
 
 const RPC_URL = process.env.RPC_URL;
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+const ALCHEMY_API_KEY = process.env.ALCHEMY_API_KEY;
 
 const provider = new ethers.JsonRpcProvider(RPC_URL);
-const ERC20_ABI = [
-  "function balanceOf(address owner) view returns (uint256)",
-  "function decimals() view returns (uint8)"
-];
-
-// Load initial cached price from file if it exists
-let cachedPrice = null;
-try {
-  const data = fs.readFileSync('cac-price.json', 'utf-8');
-  const parsed = JSON.parse(data);
-  if (parsed?.price) cachedPrice = parsed.price;
-} catch (_) {
-  cachedPrice = null;
-}
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
@@ -78,21 +64,33 @@ app.get('/api/balances', async (req, res) => {
     results.xrp = null;
   }
 
+  // ✅ USDC via Alchemy Enhanced API
   try {
-    const usdc = new ethers.Contract("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", ERC20_ABI, provider);
-    const balance = await usdc.balanceOf(wallets.usdc);
-    const decimals = await usdc.decimals();
-    results.usdc = parseFloat(ethers.formatUnits(balance, decimals));
-  } catch {
+    const alchemyRes = await axios.post(`https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "alchemy_getTokenBalances",
+      params: [wallets.usdc, ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"]] // USDC contract
+    });
+    const raw = alchemyRes.data.result.tokenBalances[0].tokenBalance;
+    results.usdc = raw ? parseFloat(ethers.formatUnits(raw, 6)) : 0;
+  } catch (err) {
+    console.error("USDC fetch error:", err.message);
     results.usdc = null;
   }
 
+  // ✅ PAXG via Alchemy Enhanced API
   try {
-    const paxg = new ethers.Contract("0x45804880De22913dAFE09f4980848ECE6EcbAf78", ERC20_ABI, provider);
-    const balance = await paxg.balanceOf(wallets.paxg);
-    const decimals = await paxg.decimals();
-    results.paxg = parseFloat(ethers.formatUnits(balance, decimals));
-  } catch {
+    const alchemyRes = await axios.post(`https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "alchemy_getTokenBalances",
+      params: [wallets.paxg, ["0x45804880De22913dAFE09f4980848ECE6EcbAf78"]] // PAXG contract
+    });
+    const raw = alchemyRes.data.result.tokenBalances[0].tokenBalance;
+    results.paxg = raw ? parseFloat(ethers.formatUnits(raw, 18)) : 0;
+  } catch (err) {
+    console.error("PAXG fetch error:", err.message);
     results.paxg = null;
   }
 
@@ -155,21 +153,9 @@ app.get('/api/balances', async (req, res) => {
 app.get('/api/update-price', async (req, res) => {
   try {
     const price = await calculateUsdPerCac();
-    cachedPrice = price.toFixed(6);
-
-    // Save to cac-price.json
-    fs.writeFileSync('cac-price.json', JSON.stringify({
-      price: cachedPrice,
-      updatedAt: new Date().toISOString()
-    }));
-
-    res.json({ price: cachedPrice });
-  } catch (err) {
-    if (cachedPrice) {
-      res.json({ price: cachedPrice });
-    } else {
-      res.status(500).json({ error: 'Failed to calculate CAC price.' });
-    }
+    res.json({ price: price.toFixed(6) });
+  } catch {
+    res.status(500).json({ error: 'Failed to calculate CAC price.' });
   }
 });
 
