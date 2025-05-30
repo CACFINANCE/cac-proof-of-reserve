@@ -1,11 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const fs = require('fs');
 require('dotenv').config();
-
-const { ethers } = require('ethers');
-const { calculateUsdPerCac } = require('./updatePrice');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -23,80 +19,80 @@ const wallets = {
   kaspa: 'kaspa:qzmre59lsdqpd66tvz5wceaw74ez8xj7x2ldvdscxngv0ld4g237v3d4dkmnd'
 };
 
-const RPC_URL = process.env.RPC_URL;
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-
-const provider = new ethers.JsonRpcProvider(RPC_URL);
-const ERC20_ABI = [
-  "function balanceOf(address owner) view returns (uint256)",
-  "function decimals() view returns (uint8)"
-];
-
-// Load initial cached price from file if it exists
-let cachedPrice = null;
-try {
-  const data = fs.readFileSync('cac-price.json', 'utf-8');
-  const parsed = JSON.parse(data);
-  if (parsed?.price) cachedPrice = parsed.price;
-} catch (_) {
-  cachedPrice = null;
-}
+const COVALENT_API_KEY = process.env.COVALENT_API_KEY;
+const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
 
 app.get('/api/balances', async (req, res) => {
   const results = {};
 
   try {
+    // ✅ BTC using Blockstream.info
     const btcRes = await axios.get(`https://blockstream.info/api/address/${wallets.btc}`);
     results.btc = btcRes.data.chain_stats.funded_txo_sum / 1e8 - btcRes.data.chain_stats.spent_txo_sum / 1e8;
-  } catch {
+  } catch (err) {
+    console.error('BTC fetch error:', err.message);
     results.btc = null;
   }
 
   try {
+    // ✅ ETH using Etherscan
     const ethRes = await axios.get(
-      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${process.env.ETHERSCAN_API_KEY}`
+      `https://api.etherscan.io/api?module=account&action=balance&address=${wallets.eth}&tag=latest&apikey=${ETHERSCAN_API_KEY}`
     );
     results.eth = parseFloat(ethRes.data.result) / 1e18;
-  } catch {
+  } catch (err) {
+    console.error('ETH fetch error:', err.message);
     results.eth = null;
   }
 
   try {
+    // TRX using Tronscan
     const trxRes = await axios.get(`https://apilist.tronscanapi.com/api/account?address=${wallets.trx}`);
     results.trx = trxRes.data.balance / 1e6;
-  } catch {
+  } catch (err) {
+    console.error('TRX fetch error:', err.message);
     results.trx = null;
   }
 
   try {
+    // XRP using Ripple public JSON-RPC
     const xrpRes = await axios.post('https://s1.ripple.com:51234/', {
       method: 'account_info',
       params: [{ account: wallets.xrp, ledger_index: 'validated', strict: true }]
     });
     results.xrp = xrpRes.data.result.account_data.Balance / 1e6;
-  } catch {
+  } catch (err) {
+    console.error('XRP fetch error:', err.message);
     results.xrp = null;
   }
 
   try {
-    const usdc = new ethers.Contract("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", ERC20_ABI, provider);
-    const balance = await usdc.balanceOf(wallets.usdc);
-    const decimals = await usdc.decimals();
-    results.usdc = parseFloat(ethers.formatUnits(balance, decimals));
-  } catch {
+    // USDC using Covalent
+    const usdcRes = await axios.get(
+      `https://api.covalenthq.com/v1/1/address/${wallets.usdc}/balances_v2/?key=${COVALENT_API_KEY}`
+    );
+    const usdcData = usdcRes.data.data.items.find(token => token.contract_ticker_symbol === 'USDC');
+    results.usdc = usdcData ? usdcData.balance / 1e6 : 0;
+  } catch (err) {
+    console.error('USDC fetch error:', err.message);
     results.usdc = null;
   }
 
   try {
-    const paxg = new ethers.Contract("0x45804880De22913dAFE09f4980848ECE6EcbAf78", ERC20_ABI, provider);
-    const balance = await paxg.balanceOf(wallets.paxg);
-    const decimals = await paxg.decimals();
-    results.paxg = parseFloat(ethers.formatUnits(balance, decimals));
-  } catch {
+    // PAXG using Covalent
+    const paxgRes = await axios.get(
+      `https://api.covalenthq.com/v1/1/address/${wallets.paxg}/balances_v2/?key=${COVALENT_API_KEY}`
+    );
+    const paxgData = paxgRes.data.data.items.find(token => token.contract_ticker_symbol === 'PAXG');
+    results.paxg = paxgData ? paxgData.balance / 1e18 : 0;
+  } catch (err) {
+    console.error('PAXG fetch error:', err.message);
     results.paxg = null;
   }
 
   try {
+    // SOL using Helius
     const solanaRes = await axios.post(
       `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
       {
@@ -107,11 +103,13 @@ app.get('/api/balances', async (req, res) => {
       }
     );
     results.sol = solanaRes.data.result.value / 1e9;
-  } catch {
+  } catch (err) {
+    console.error('SOL fetch error:', err.message);
     results.sol = null;
   }
 
   try {
+    // RNDR on Solana
     const renderRes = await axios.post(
       `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
       {
@@ -138,39 +136,25 @@ app.get('/api/balances', async (req, res) => {
     }
 
     results.rndr = totalRender;
-  } catch {
+  } catch (err) {
+    console.error('RNDR fetch error:', err.message);
     results.rndr = null;
   }
 
   try {
+    // ✅ KASPA using Kaspa.org
     const kaspaRes = await axios.get(`https://api.kaspa.org/addresses/${wallets.kaspa}/balance`);
-    results.kaspa = kaspaRes.data.balance / 1e8;
-  } catch {
+    if (kaspaRes.data && kaspaRes.data.balance) {
+      results.kaspa = kaspaRes.data.balance / 1e8;
+    } else {
+      results.kaspa = null;
+    }
+  } catch (err) {
+    console.error('KASPA fetch error:', err.message);
     results.kaspa = null;
   }
 
   res.json(results);
-});
-
-app.get('/api/update-price', async (req, res) => {
-  try {
-    const price = await calculateUsdPerCac();
-    cachedPrice = price.toFixed(6);
-
-    // Save to cac-price.json
-    fs.writeFileSync('cac-price.json', JSON.stringify({
-      price: cachedPrice,
-      updatedAt: new Date().toISOString()
-    }));
-
-    res.json({ price: cachedPrice });
-  } catch (err) {
-    if (cachedPrice) {
-      res.json({ price: cachedPrice });
-    } else {
-      res.status(500).json({ error: 'Failed to calculate CAC price.' });
-    }
-  }
 });
 
 app.listen(PORT, () => {
