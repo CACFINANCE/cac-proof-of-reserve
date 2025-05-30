@@ -3,26 +3,14 @@ const axios = require("axios");
 const { ethers } = require("ethers");
 
 // === CONFIG ===
-const RPC_URL = process.env.RPC_URL_PRIMARY;
+const RPC_URL_SEPOLIA = process.env.RPC_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 
 const CAC_MAINNET_CONTRACT = "0xaE811d6CE4ca45Dfd4874d95CCB949312F909a21";
-const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
+const CAC_RESERVE_SEPOLIA = "0xEd9218734bb090daf07226D5B56cf1266208f943";
+const ETHERSCAN_API_KEY = "NTUDA2PHU25KVX1NTD9TG6Y3HX34ZANI7Y";
 const BACKEND_URL = "https://cac-backend-2i3y.onrender.com/api/balances";
 
-const COINGECKO_IDS = {
-  btc: "bitcoin",
-  eth: "ethereum",
-  trx: "tron",
-  xrp: "ripple",
-  usdc: "usd-coin",
-  paxg: "pax-gold",
-  sol: "solana",
-  rndr: "render-token",
-  kaspa: "kaspa",
-};
-
-const CAC_RESERVE_SEPOLIA = "0xEd9218734bb090daf07226D5B56cf1266208f943";
 const CAC_RESERVE_ABI = [
   {
     inputs: [{ internalType: "uint256", name: "usdPerToken", type: "uint256" }],
@@ -40,7 +28,19 @@ const CAC_RESERVE_ABI = [
   },
 ];
 
-// === Fetch CAC total supply from Etherscan ===
+const COINGECKO_IDS = {
+  btc: "bitcoin",
+  eth: "ethereum",
+  trx: "tron",
+  xrp: "ripple",
+  usdc: "usd-coin",
+  paxg: "pax-gold",
+  sol: "solana",
+  rndr: "render-token",
+  kaspa: "kaspa",
+};
+
+// === Fetch CAC total supply from Ethereum mainnet ===
 async function fetchTotalSupplyFromEtherscan() {
   const res = await axios.get("https://api.etherscan.io/api", {
     params: {
@@ -58,74 +58,68 @@ async function fetchTotalSupplyFromEtherscan() {
   return BigInt(res.data.result);
 }
 
-// === Calculate USD per CAC token ===
-async function calculateUsdPerCac() {
-  // Connect to provider (for optional on-chain update)
-  const provider = new ethers.JsonRpcProvider(RPC_URL);
-  const signer = new ethers.Wallet(PRIVATE_KEY, provider);
-  const contract = new ethers.Contract(CAC_RESERVE_SEPOLIA, CAC_RESERVE_ABI, signer);
+// === Main Script ===
+async function main() {
+  try {
+    // Fetch token balances from backend
+    const balancesRes = await axios.get(BACKEND_URL);
+    const balances = balancesRes.data;
 
-  // Fetch token balances from backend
-  const balancesRes = await axios.get(BACKEND_URL);
-  const balances = balancesRes.data;
+    // Prepare list of CoinGecko IDs for price fetch
+    const ids = Object.keys(balances)
+      .map((token) => COINGECKO_IDS[token.toLowerCase()])
+      .filter(Boolean)
+      .join(",");
 
-  // Build CoinGecko request
-  const ids = Object.keys(balances)
-    .map((token) => COINGECKO_IDS[token.toLowerCase()])
-    .filter(Boolean)
-    .join(",");
+    // Fetch prices
+    const priceRes = await axios.get("https://api.coingecko.com/api/v3/simple/price", {
+      params: { ids, vs_currencies: "usd" },
+    });
 
-  const priceRes = await axios.get("https://api.coingecko.com/api/v3/simple/price", {
-    params: { ids, vs_currencies: "usd" },
-  });
+    const prices = priceRes.data;
 
-  const prices = priceRes.data;
+    let totalReserveUSD = 0;
+    let missingPrices = [];
 
-  let totalReserveUSD = 0;
-  let missingPrices = [];
+    // Check and sum up reserve value
+    for (const [token, balance] of Object.entries(balances)) {
+      const id = COINGECKO_IDS[token.toLowerCase()];
+      const price = prices[id]?.usd;
 
-  for (const [token, balance] of Object.entries(balances)) {
-    const id = COINGECKO_IDS[token.toLowerCase()];
-    const price = prices[id]?.usd;
+      if (!price) {
+        missingPrices.push(token.toUpperCase());
+        continue;
+      }
 
-    if (!price) {
-      missingPrices.push(token.toUpperCase());
-      continue;
+      const usdValue = balance * price;
+      totalReserveUSD += usdValue;
     }
 
-    totalReserveUSD += balance * price;
+    // Abort if any token price is missing
+    if (missingPrices.length > 0) {
+      throw new Error(`Error fetching price for tokens: ${missingPrices.join(", ")}`);
+    }
+
+    if (totalReserveUSD <= 0) throw new Error("Total reserve is zero. Aborting.");
+
+    // Fetch total supply (raw)
+    const totalSupplyRaw = await fetchTotalSupplyFromEtherscan();
+
+    // Format total supply (8 decimals)
+    const totalSupplyStr = ethers.formatUnits(totalSupplyRaw.toString(), 8);
+    const totalSupplyNum = Number(totalSupplyStr);
+
+    if (totalSupplyNum <= 0) throw new Error("Total CAC supply is zero.");
+
+    // Calculate USD per CAC
+    const usdPerCAC = totalReserveUSD / totalSupplyNum;
+
+    // Show final USD per CAC only
+    console.log(`📈 USD per CAC: $${usdPerCAC.toFixed(2)}`);
+
+  } catch (err) {
+    console.error("❌ Error:", err.message || err);
   }
-
-  if (missingPrices.length > 0) {
-    throw new Error(`Missing prices for: ${missingPrices.join(", ")}`);
-  }
-
-  if (totalReserveUSD <= 0) {
-    throw new Error("Total reserve is zero.");
-  }
-
-  // Get CAC total supply
-  const totalSupplyRaw = await fetchTotalSupplyFromEtherscan();
-  const totalSupply = parseFloat(ethers.formatUnits(totalSupplyRaw, 8));
-
-  if (totalSupply <= 0) {
-    throw new Error("Total CAC supply is zero.");
-  }
-
-  // Final USD price per CAC
-  return totalReserveUSD / totalSupply;
 }
 
-// === CLI run support ===
-if (require.main === module) {
-  calculateUsdPerCac()
-    .then((price) => {
-      console.log(`📈 USD per CAC: $${price.toFixed(4)}`);
-    })
-    .catch((err) => {
-      console.error("❌ Error:", err.message || err);
-    });
-}
-
-// === Export for reuse in index.js
-module.exports = { calculateUsdPerCac };
+main();
