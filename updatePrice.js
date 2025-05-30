@@ -5,10 +5,10 @@ const { ethers } = require("ethers");
 // === CONFIG ===
 const RPC_URL_SEPOLIA = process.env.RPC_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
-
 const CAC_MAINNET_CONTRACT = "0xaE811d6CE4ca45Dfd4874d95CCB949312F909a21";
 const CAC_RESERVE_SEPOLIA = "0xEd9218734bb090daf07226D5B56cf1266208f943";
 const ETHERSCAN_API_KEY = "NTUDA2PHU25KVX1NTD9TG6Y3HX34ZANI7Y";
+const CMC_API_KEY = process.env.CMC_API_KEY;
 const BACKEND_URL = "https://cac-backend-2i3y.onrender.com/api/balances";
 
 const CAC_RESERVE_ABI = [
@@ -28,6 +28,11 @@ const CAC_RESERVE_ABI = [
   },
 ];
 
+// === SYMBOL & ID MAPPING ===
+const SYMBOL_MAP = {
+  rndr: "RENDER",
+  kaspa: "KAS",
+};
 const COINGECKO_IDS = {
   btc: "bitcoin",
   eth: "ethereum",
@@ -58,63 +63,92 @@ async function fetchTotalSupplyFromEtherscan() {
   return BigInt(res.data.result);
 }
 
-// === Main Script ===
-async function main() {
+// === Fetch prices from CoinMarketCap ===
+async function fetchCMCPrices(tokens) {
+  const symbols = tokens.map((t) => SYMBOL_MAP[t.toLowerCase()] || t.toUpperCase()).join(",");
+
   try {
-    // Fetch token balances from backend
-    const balancesRes = await axios.get(BACKEND_URL);
-    const balances = balancesRes.data;
+    const res = await axios.get("https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest", {
+      headers: { "X-CMC_PRO_API_KEY": CMC_API_KEY },
+      params: { symbol: symbols, convert: "USD" },
+    });
 
-    // Prepare list of CoinGecko IDs for price fetch
-    const ids = Object.keys(balances)
-      .map((token) => COINGECKO_IDS[token.toLowerCase()])
-      .filter(Boolean)
-      .join(",");
+    return tokens.reduce((acc, token) => {
+      const cmcSymbol = SYMBOL_MAP[token.toLowerCase()] || token.toUpperCase();
+      const price = res.data.data?.[cmcSymbol]?.quote?.USD?.price;
+      if (price) acc[token.toLowerCase()] = { price, source: "CMC" };
+      return acc;
+    }, {});
+  } catch (e) {
+    console.warn("⚠️ CMC failed:", e.response?.data || e.message);
+    return {};
+  }
+}
 
-    // Fetch prices
-    const priceRes = await axios.get("https://api.coingecko.com/api/v3/simple/price", {
+// === Fallback to CoinGecko ===
+async function fetchCoinGeckoPrices(tokens) {
+  const ids = tokens
+    .map((t) => COINGECKO_IDS[t.toLowerCase()])
+    .filter(Boolean)
+    .join(",");
+
+  try {
+    const res = await axios.get("https://api.coingecko.com/api/v3/simple/price", {
       params: { ids, vs_currencies: "usd" },
     });
 
-    const prices = priceRes.data;
-
-    let totalReserveUSD = 0;
-    let missingPrices = [];
-
-    // Check and sum up reserve value
-    for (const [token, balance] of Object.entries(balances)) {
+    return tokens.reduce((acc, token) => {
       const id = COINGECKO_IDS[token.toLowerCase()];
-      const price = prices[id]?.usd;
+      const price = res.data?.[id]?.usd;
+      if (price) acc[token.toLowerCase()] = { price, source: "CoinGecko" };
+      return acc;
+    }, {});
+  } catch (e) {
+    console.warn("⚠️ CoinGecko failed:", e.response?.data || e.message);
+    return {};
+  }
+}
 
-      if (!price) {
-        missingPrices.push(token.toUpperCase());
-        continue;
-      }
+// === Main Script ===
+async function main() {
+  try {
+    const balancesRes = await axios.get(BACKEND_URL);
+    const balances = balancesRes.data;
+    const tokens = Object.keys(balances);
 
-      const usdValue = balance * price;
-      totalReserveUSD += usdValue;
+    const cmcPrices = await fetchCMCPrices(tokens);
+    const missingTokens = tokens.filter((t) => !cmcPrices[t.toLowerCase()]);
+
+    const fallbackPrices = await fetchCoinGeckoPrices(missingTokens);
+    const combinedPrices = { ...cmcPrices, ...fallbackPrices };
+
+    const stillMissing = tokens.filter((t) => !combinedPrices[t.toLowerCase()]);
+    if (stillMissing.length > 0) {
+      throw new Error(
+        `❌ Failed to fetch USD prices for: ${stillMissing.join(", ")}`
+      );
     }
 
-    // Abort if any token price is missing
-    if (missingPrices.length > 0) {
-      throw new Error(`Error fetching price for tokens: ${missingPrices.join(", ")}`);
+    // Total reserve USD
+    let totalReserveUSD = 0;
+    for (const [token, balance] of Object.entries(balances)) {
+      const { price, source } = combinedPrices[token.toLowerCase()];
+      const usdValue = balance * price;
+      totalReserveUSD += usdValue;
+      console.log(`💰 ${token.toUpperCase()} = $${price.toFixed(2)} (from ${source})`);
     }
 
     if (totalReserveUSD <= 0) throw new Error("Total reserve is zero. Aborting.");
 
-    // Fetch total supply (raw)
+    // Fetch total CAC supply
     const totalSupplyRaw = await fetchTotalSupplyFromEtherscan();
-
-    // Format total supply (8 decimals)
     const totalSupplyStr = ethers.formatUnits(totalSupplyRaw.toString(), 8);
     const totalSupplyNum = Number(totalSupplyStr);
 
     if (totalSupplyNum <= 0) throw new Error("Total CAC supply is zero.");
 
-    // Calculate USD per CAC
+    // Calculate and log USD per CAC
     const usdPerCAC = totalReserveUSD / totalSupplyNum;
-
-    // Show final USD per CAC only
     console.log(`📈 USD per CAC: $${usdPerCAC.toFixed(2)}`);
 
   } catch (err) {
