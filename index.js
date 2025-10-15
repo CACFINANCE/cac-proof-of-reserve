@@ -26,6 +26,7 @@ const RPC_URL = process.env.RPC_URL;
 const BSC_RPC_URL = process.env.BSC_RPC_URL;
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const CAC_CONTRACT = '0x50f3C527e5772BB24897591C20f7430ea8c34437';
+const USDC_CONTRACT = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
 
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 const bscProvider = new ethers.JsonRpcProvider(BSC_RPC_URL);
@@ -42,7 +43,6 @@ let cachedPrice = null;
 let lastPriceUpdate = 0;
 const PRICE_CACHE_DURATION = 60000; // 1 minute
 
-// NEW: Portfolio data cache (shared by all users)
 let cachedPortfolioData = null;
 let lastPortfolioFetch = 0;
 const PORTFOLIO_CACHE_DURATION = 60000; // 1 minute
@@ -63,20 +63,23 @@ try {
 // HELPER FUNCTIONS
 // ========================================
 
-// Extract balance fetching logic into reusable function
 async function fetchAllBalances() {
   const results = {};
 
+  // BTC
   try {
+    console.log('Fetching BTC balance...');
     const btcRes = await axios.get(`https://blockstream.info/api/address/${wallets.btc}`, { timeout: 10000 });
     results.btc = btcRes.data.chain_stats.funded_txo_sum / 1e8 - btcRes.data.chain_stats.spent_txo_sum / 1e8;
-    console.log(`BTC balance: ${results.btc} BTC`);
+    console.log(`✓ BTC balance: ${results.btc}`);
   } catch (err) {
-    console.error('BTC balance error:', err.message);
+    console.error('❌ BTC balance error:', err.message);
     results.btc = null;
   }
 
+  // ETH
   try {
+    console.log('Fetching ETH balance...');
     const ethRes = await axios.get(`https://api.etherscan.io/v2/api`, {
       params: {
         chainid: 1,
@@ -93,68 +96,74 @@ async function fetchAllBalances() {
       const rawBalance = String(ethRes.data.result).trim();
       const ethBalanceWei = BigInt(rawBalance);
       results.eth = parseFloat(ethers.formatEther(ethBalanceWei));
-      console.log(`ETH balance: ${results.eth} ETH`);
+      console.log(`✓ ETH balance: ${results.eth}`);
     } else {
-      throw new Error(`Etherscan v2 error: ${ethRes.data.message}`);
+      throw new Error(`Etherscan error: ${ethRes.data.message}`);
     }
   } catch (err) {
-    console.error('ETH Etherscan error:', err.message);
+    console.error('⚠️ ETH Etherscan error, trying RPC:', err.message);
     try {
       const balance = await provider.getBalance(wallets.eth);
       results.eth = parseFloat(ethers.formatEther(balance));
-      console.log(`ETH balance from RPC: ${results.eth} ETH`);
+      console.log(`✓ ETH balance from RPC: ${results.eth}`);
     } catch (rpcErr) {
-      console.error('ETH RPC fallback error:', rpcErr.message);
+      console.error('❌ ETH RPC error:', rpcErr.message);
       results.eth = null;
     }
   }
 
+  // TRX
   try {
+    console.log('Fetching TRX balance...');
     const trxRes = await axios.get(`https://apilist.tronscanapi.com/api/account?address=${wallets.trx}`, { timeout: 10000 });
     results.trx = trxRes.data.balance / 1e6;
-    console.log(`TRX balance: ${results.trx} TRX`);
+    console.log(`✓ TRX balance: ${results.trx}`);
   } catch (err) {
-    console.error('TRX balance error:', err.message);
+    console.error('❌ TRX balance error:', err.message);
     results.trx = null;
   }
 
+  // XRP
   try {
+    console.log('Fetching XRP balance...');
     const xrpRes = await axios.post('https://s1.ripple.com:51234/', {
       method: 'account_info',
       params: [{ account: wallets.xrp, ledger_index: 'validated', strict: true }]
     }, { timeout: 10000 });
     results.xrp = xrpRes.data.result.account_data.Balance / 1e6;
-    console.log(`XRP balance: ${results.xrp} XRP`);
+    console.log(`✓ XRP balance: ${results.xrp}`);
   } catch (err) {
-    console.error('XRP balance error:', err.message);
+    console.error('❌ XRP balance error:', err.message);
     results.xrp = null;
   }
 
-  // Fetch USDC Allocation balance
+  // USDC Allocation
   try {
-    const usdc = new ethers.Contract("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", ERC20_ABI, provider);
-    const balance = await usdc.balanceOf(wallets.usdcAllocation);
-    const decimals = await usdc.decimals();
-    results.usdcAllocation = parseFloat(ethers.formatUnits(balance, decimals));
-    console.log(`USDC Allocation balance: ${results.usdcAllocation} USDC`);
+    console.log('Fetching USDC Allocation balance...');
+    const usdcContract = new ethers.Contract(USDC_CONTRACT, ERC20_ABI, provider);
+    const balance = await usdcContract.balanceOf(wallets.usdcAllocation);
+    results.usdcAllocation = parseFloat(ethers.formatUnits(balance, 6));
+    console.log(`✓ USDC Allocation: ${results.usdcAllocation}`);
   } catch (err) {
-    console.error('USDC Allocation balance error:', err.message);
+    console.error('❌ USDC Allocation error:', err.message);
     results.usdcAllocation = null;
   }
 
-  // Fetch USDC Treasury balance
+  // USDC Treasury
   try {
-    const usdc = new ethers.Contract("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", ERC20_ABI, provider);
-    const balance = await usdc.balanceOf(wallets.usdcTreasury);
-    const decimals = await usdc.decimals();
-    results.usdcTreasury = parseFloat(ethers.formatUnits(balance, decimals));
-    console.log(`USDC Treasury balance: ${results.usdcTreasury} USDC`);
+    console.log('Fetching USDC Treasury balance...');
+    const usdcContract = new ethers.Contract(USDC_CONTRACT, ERC20_ABI, provider);
+    const balance = await usdcContract.balanceOf(wallets.usdcTreasury);
+    results.usdcTreasury = parseFloat(ethers.formatUnits(balance, 6));
+    console.log(`✓ USDC Treasury: ${results.usdcTreasury}`);
   } catch (err) {
-    console.error('USDC Treasury balance error:', err.message);
+    console.error('❌ USDC Treasury error:', err.message);
     results.usdcTreasury = null;
   }
 
+  // SOL
   try {
+    console.log('Fetching SOL balance...');
     const solanaRes = await axios.post(
       `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
       {
@@ -166,13 +175,15 @@ async function fetchAllBalances() {
       { timeout: 10000 }
     );
     results.sol = solanaRes.data.result.value / 1e9;
-    console.log(`SOL balance: ${results.sol} SOL`);
+    console.log(`✓ SOL balance: ${results.sol}`);
   } catch (err) {
-    console.error('SOL balance error:', err.message);
+    console.error('❌ SOL balance error:', err.message);
     results.sol = null;
   }
 
+  // BNB
   try {
+    console.log('Fetching BNB balance...');
     const bnbRes = await axios.get(`https://api.etherscan.io/v2/api`, {
       params: {
         chainid: 56,
@@ -187,29 +198,28 @@ async function fetchAllBalances() {
 
     if (bnbRes.data.status === "1" && bnbRes.data.result) {
       results.bnb = parseFloat(ethers.formatEther(bnbRes.data.result));
-      console.log(`BNB balance: ${results.bnb} BNB`);
+      console.log(`✓ BNB balance: ${results.bnb}`);
     } else {
-      const balance = await bscProvider.getBalance(wallets.bnb);
-      results.bnb = parseFloat(ethers.formatEther(balance));
-      console.log(`BNB balance from RPC: ${results.bnb} BNB`);
+      throw new Error('Etherscan BNB error');
     }
   } catch (err) {
-    console.error('BNB balance error:', err.message);
+    console.error('⚠️ BNB Etherscan error, trying RPC:', err.message);
     try {
       const balance = await bscProvider.getBalance(wallets.bnb);
       results.bnb = parseFloat(ethers.formatEther(balance));
-      console.log(`BNB balance from RPC fallback: ${results.bnb} BNB`);
+      console.log(`✓ BNB balance from RPC: ${results.bnb}`);
     } catch (err2) {
-      console.error('BNB fallback error:', err2.message);
+      console.error('❌ BNB RPC error:', err2.message);
       results.bnb = null;
     }
   }
 
+  console.log('========================================');
   console.log('Final balances:', results);
+  console.log('========================================');
   return results;
 }
 
-// Fetch prices from CoinGecko
 async function fetchPrices() {
   const ids = 'bitcoin,ethereum,binancecoin,usd-coin,ripple,solana,tron';
   console.log('Fetching prices from CoinGecko...');
@@ -219,11 +229,10 @@ async function fetchPrices() {
     timeout: 15000
   });
   
-  console.log('✓ Prices fetched');
+  console.log('✓ Prices fetched successfully');
   return response.data;
 }
 
-// Fetch CAC total supply
 async function fetchCACSupply() {
   console.log('Fetching CAC total supply...');
   
@@ -241,13 +250,13 @@ async function fetchCACSupply() {
     
     if (response.data.status === "1" && response.data.result) {
       const supply = parseFloat(ethers.formatUnits(response.data.result, 8));
-      console.log('✓ CAC supply fetched:', supply);
+      console.log('✓ CAC supply:', supply);
       return supply;
     }
     throw new Error('Invalid Etherscan response');
     
   } catch (error) {
-    console.warn('Etherscan failed, trying Ethplorer...');
+    console.warn('⚠️ Etherscan failed, trying Ethplorer...');
     
     const response = await axios.get(`https://api.ethplorer.io/getTokenInfo/${CAC_CONTRACT}`, {
       params: { apiKey: 'freekey' },
@@ -256,11 +265,11 @@ async function fetchCACSupply() {
     
     if (response.data.totalSupply) {
       const supply = parseFloat(response.data.totalSupply) / 1e8;
-      console.log('✓ CAC supply fetched from Ethplorer:', supply);
+      console.log('✓ CAC supply from Ethplorer:', supply);
       return supply;
     }
     
-    throw new Error('Failed to fetch CAC supply from all sources');
+    throw new Error('Failed to fetch CAC supply');
   }
 }
 
@@ -268,7 +277,6 @@ async function fetchCACSupply() {
 // API ENDPOINTS
 // ========================================
 
-// Health check
 app.get('/', (req, res) => {
   res.json({ 
     status: 'online',
@@ -282,7 +290,6 @@ app.get('/', (req, res) => {
   });
 });
 
-// Original balances endpoint (kept for backwards compatibility)
 app.get('/api/balances', async (req, res) => {
   try {
     const results = await fetchAllBalances();
@@ -293,14 +300,12 @@ app.get('/api/balances', async (req, res) => {
   }
 });
 
-// NEW: Cached portfolio data endpoint (ALL USERS GET SAME DATA)
 app.get('/api/portfolio-data', async (req, res) => {
   const now = Date.now();
   const cacheAge = now - lastPortfolioFetch;
   
-  // Return cached data if still fresh
   if (cachedPortfolioData && cacheAge < PORTFOLIO_CACHE_DURATION) {
-    console.log(`✓ Serving cached portfolio data (${Math.floor(cacheAge / 1000)}s old)`);
+    console.log(`✓ Serving cached portfolio (${Math.floor(cacheAge / 1000)}s old)`);
     return res.json({
       ...cachedPortfolioData,
       cached: true,
@@ -308,8 +313,7 @@ app.get('/api/portfolio-data', async (req, res) => {
     });
   }
   
-  // Fetch fresh data
-  console.log('Cache expired, fetching fresh portfolio data...');
+  console.log('Cache expired, fetching fresh data...');
   
   try {
     const [balances, prices, cacSupply] = await Promise.all([
@@ -326,7 +330,7 @@ app.get('/api/portfolio-data', async (req, res) => {
     };
     lastPortfolioFetch = now;
     
-    console.log('✓ Portfolio data cached successfully');
+    console.log('✓ Portfolio data cached');
     
     res.json({
       ...cachedPortfolioData,
@@ -335,11 +339,10 @@ app.get('/api/portfolio-data', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error fetching portfolio data:', error.message);
+    console.error('❌ Error fetching portfolio:', error.message);
     
-    // Return stale cache if available
     if (cachedPortfolioData) {
-      console.log('Returning stale cache due to error');
+      console.log('⚠️ Returning stale cache');
       return res.json({
         ...cachedPortfolioData,
         cached: true,
@@ -353,11 +356,9 @@ app.get('/api/portfolio-data', async (req, res) => {
   }
 });
 
-// CAC Price endpoint (already existed, keeping your version)
 app.get('/api/update-price', async (req, res) => {
   const now = Date.now();
   
-  // Return cached price if updated recently
   if (cachedPrice && (now - lastPriceUpdate) < PRICE_CACHE_DURATION) {
     console.log(`Serving cached price (${Math.floor((now - lastPriceUpdate) / 1000)}s old): ${cachedPrice}`);
     return res.json({ 
@@ -367,7 +368,7 @@ app.get('/api/update-price', async (req, res) => {
     });
   }
   
-  console.log('Price update requested...');
+  console.log('Calculating fresh CAC price...');
   
   try {
     const price = await calculateUsdPerCac();
@@ -379,22 +380,21 @@ app.get('/api/update-price', async (req, res) => {
       updatedAt: new Date().toISOString()
     }));
 
-    console.log(`Price updated successfully: ${cachedPrice}`);
+    console.log(`✓ Price updated: ${cachedPrice}`);
     res.json({ price: cachedPrice, updated: true });
     
   } catch (err) {
-    console.error('Price calculation failed:', err.message);
+    console.error('❌ Price calculation failed:', err.message);
     
     if (cachedPrice) {
-      console.log(`Serving cached price after error: ${cachedPrice}`);
+      console.log(`⚠️ Serving cached price after error: ${cachedPrice}`);
       res.json({ price: cachedPrice, updated: false, cached: true, error: err.message });
     } else {
-      res.status(500).json({ error: 'Failed to calculate CAC price and no cache available.' });
+      res.status(500).json({ error: 'Failed to calculate CAC price' });
     }
   }
 });
 
-// NEW: Cache status endpoint (for debugging)
 app.get('/api/cache-status', (req, res) => {
   const now = Date.now();
   
@@ -416,19 +416,19 @@ app.get('/api/cache-status', (req, res) => {
   });
 });
 
-// NEW: Force cache refresh (for manual testing)
 app.post('/api/refresh-cache', (req, res) => {
   console.log('Manual cache refresh requested');
   lastPortfolioFetch = 0;
   lastPriceUpdate = 0;
   res.json({ 
     success: true, 
-    message: 'Cache cleared. Will refresh on next request.' 
+    message: 'Cache cleared' 
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 CAC Proof-of-Reserve Backend running on port ${PORT}`);
-  console.log(`📊 Portfolio cache duration: ${PORTFOLIO_CACHE_DURATION / 1000} seconds`);
-  console.log(`💰 Price cache duration: ${PRICE_CACHE_DURATION / 1000} seconds`);
+  console.log(`========================================`);
+  console.log(`🚀 CAC Reserve API running on port ${PORT}`);
+  console.log(`📊 Cache duration: ${PORTFOLIO_CACHE_DURATION / 1000}s`);
+  console.log(`========================================`);
 });
